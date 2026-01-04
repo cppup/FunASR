@@ -34,6 +34,46 @@ def resolve_relative_paths(kwargs, model_path):
     return kwargs
 
 
+def prepare_config_kwargs(kwargs):
+    """Prepare configuration kwargs for model loading.
+    
+    Handles two scenarios:
+    1. Download model from hub: Uses download_model()
+    2. Load from local config: Resolves relative paths using ModelScope cache
+    
+    Args:
+        kwargs: Configuration dictionary containing model settings
+    
+    Returns:
+        Updated kwargs with resolved paths
+    """
+    if "model_conf" not in kwargs:
+        # Scenario 1: Download model from hub
+        logging.info("download models from model hub: {}".format(kwargs.get("hub", "ms")))
+        kwargs = download_model(is_training=kwargs.get("is_training", True), **kwargs)
+    else:
+        # Scenario 2: Load from local config, resolve relative paths
+        pretrained_model = kwargs.get("pretrained_model", None)
+        if pretrained_model is None:
+            # Try to find model in ModelScope cache
+            modelscope_cache = os.environ.get("MODELSCOPE_CACHE", os.path.expanduser("~/.cache/modelscope"))
+            # Try common model locations
+            possible_paths = [
+                os.path.join(modelscope_cache, "models", "FunAudioLLM", "Fun-ASR-Nano-2512"),
+                os.path.join(modelscope_cache, "hub", "FunAudioLLM", "Fun-ASR-Nano-2512"),
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    pretrained_model = path
+                    break
+        
+        if pretrained_model and os.path.exists(pretrained_model):
+            logging.info(f"Using pretrained model path: {pretrained_model}")
+            kwargs = resolve_relative_paths(kwargs, pretrained_model)
+    
+    return kwargs
+
+
 def download_model(**kwargs):
     hub = kwargs.get("hub", "ms")
     if hub == "ms" or hub == "modelscope":

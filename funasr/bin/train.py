@@ -28,7 +28,6 @@ from funasr.optimizers import optim_classes
 from funasr.train_utils.trainer import Trainer
 from funasr.schedulers import scheduler_classes
 from funasr.train_utils.initialize import initialize
-from funasr.download.download_model_from_hub import download_model
 from funasr.models.lora.utils import mark_only_lora_as_trainable
 from funasr.train_utils.set_all_random_seed import set_all_random_seed
 from funasr.train_utils.load_pretrained_model import load_pretrained_model
@@ -47,29 +46,8 @@ def main_hydra(kwargs: DictConfig):
         pdb.set_trace()
 
     assert "model" in kwargs
-    if "model_conf" not in kwargs:
-        logging.info("download models from model hub: {}".format(kwargs.get("hub", "ms")))
-        kwargs = download_model(is_training=kwargs.get("is_training", True), **kwargs)
-    else:
-        # When loading from local config, resolve relative paths
-        # Look for pretrained model in modelscope cache to resolve relative paths
-        pretrained_model = kwargs.get("pretrained_model", None)
-        if pretrained_model is None:
-            modelscope_cache = os.environ.get("MODELSCOPE_CACHE", os.path.expanduser("~/.cache/modelscope"))
-            # Try common model locations
-            possible_paths = [
-                os.path.join(modelscope_cache, "models", "FunAudioLLM", "Fun-ASR-Nano-2512"),
-                os.path.join(modelscope_cache, "hub", "FunAudioLLM", "Fun-ASR-Nano-2512"),
-            ]
-            for path in possible_paths:
-                if os.path.exists(path):
-                    pretrained_model = path
-                    break
-        
-        if pretrained_model and os.path.exists(pretrained_model):
-            from funasr.download.download_model_from_hub import resolve_relative_paths
-            logging.info(f"Using pretrained model path: {pretrained_model}")
-            kwargs = resolve_relative_paths(kwargs, pretrained_model)
+    from funasr.download.download_model_from_hub import prepare_config_kwargs
+    kwargs = prepare_config_kwargs(kwargs)
 
     main(**kwargs)
 
