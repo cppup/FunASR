@@ -110,7 +110,7 @@ class SpeechPreprocessNoiseAug(nn.Module):
             # If noise is shorter than target, repeat it
             if len(noise) < target_length:
                 num_repeats = int(np.ceil(target_length / len(noise)))
-                noise = noise.repeat(num_repeats)
+                noise = noise.repeat(num_repeats)[:target_length]
             
             # If noise is longer, randomly crop it
             if len(noise) > target_length:

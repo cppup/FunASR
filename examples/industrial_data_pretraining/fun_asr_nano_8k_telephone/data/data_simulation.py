@@ -15,6 +15,7 @@ Converts high-quality 16kHz audio to 8kHz telephone channel simulated audio with
 import argparse
 import json
 import os
+import random
 import sys
 from pathlib import Path
 
@@ -107,14 +108,14 @@ class TelephoneChannelSimulator:
                 num_samples = int(len(noise) * fs / noise_fs)
                 noise = signal.resample(noise, num_samples)
             
-            # If noise is shorter than target, repeat it
+            # If noise is shorter than target, tile it
             if len(noise) < target_length:
                 num_repeats = int(np.ceil(target_length / len(noise)))
-                noise = np.tile(noise, num_repeats)
+                noise = np.tile(noise, num_repeats)[:target_length]
             
             # If noise is longer, randomly crop it
             if len(noise) > target_length:
-                start_idx = np.random.randint(0, len(noise) - target_length)
+                start_idx = np.random.randint(0, len(noise) - target_length + 1)
                 noise = noise[start_idx:start_idx + target_length]
             
             return noise
@@ -137,8 +138,8 @@ class TelephoneChannelSimulator:
         if not self.bg_noise_list:
             return audio
         
-        # Randomly select a noise file
-        noise_path = np.random.choice(self.bg_noise_list)
+        # Randomly select a noise file using random.choice for better performance
+        noise_path = random.choice(self.bg_noise_list)
         
         # Load noise segment
         noise = self._load_noise_segment(noise_path, len(audio), fs)
