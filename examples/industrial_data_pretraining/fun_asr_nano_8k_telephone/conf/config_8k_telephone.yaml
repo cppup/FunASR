@@ -1,0 +1,138 @@
+# Copyright FunASR (https://github.com/alibaba-damo-academy/FunASR). All Rights Reserved.
+#  MIT License  (https://opensource.org/licenses/MIT)
+
+# Configuration file for Fun-ASR-Nano 8kHz telephone channel fine-tuning
+# This configuration is optimized for narrowband telephone audio (8kHz sampling rate)
+
+# Network architecture
+model: FunASRNano
+model_conf:
+    lsm_weight: 0.1  # Label smoothing
+    length_normalized_loss: true
+
+# Audio Encoder Configuration
+# Using pre-trained Whisper or custom encoder
+audio_encoder: "FunAudioLLM/Fun-ASR-Nano-2512"
+audio_encoder_conf:
+    hub: ms  # ModelScope hub
+    freeze: false  # Allow fine-tuning
+    freeze_layer_num: 12  # Freeze first 12 layers, fine-tune remaining layers
+    activation_checkpoint: false
+
+# LLM Configuration with LoRA
+llm: Qwen2.5-1.5B-Instruct
+llm_conf:
+    hub: ms
+    freeze: true  # Freeze base LLM
+    use_lora: true  # Enable LoRA for efficient fine-tuning
+    lora_conf:
+        r: 32  # LoRA rank
+        lora_alpha: 64  # LoRA alpha scaling
+        lora_dropout: 0.05
+        target_modules: 
+            - "q_proj"
+            - "v_proj"
+            - "k_proj"
+            - "o_proj"
+            - "gate_proj"
+            - "up_proj"
+            - "down_proj"
+        bias: "none"
+        task_type: "CAUSAL_LM"
+        freeze_lora: false  # Allow LoRA training
+    init_param_path: "Qwen/Qwen2.5-1.5B-Instruct"
+    load_kwargs:
+        torch_dtype: "bfloat16"
+
+# Audio Adaptor Configuration
+# Fully fine-tune the adaptor for 8kHz domain adaptation
+audio_adaptor: Linear
+audio_adaptor_conf:
+    downsample_rate: 5
+    llm_dim: 1536  # Qwen2.5-1.5B hidden size
+    encoder_dim: 512  # Depends on audio encoder
+
+# Frontend Configuration for 8kHz Audio
+frontend: WhisperFrontend
+frontend_conf:
+    fs: 8000  # 8kHz sampling rate for telephone audio
+    n_fft: 200  # 25ms window at 8kHz (200 samples = 25ms)
+    hop_length: 80  # 10ms hop at 8kHz (80 samples = 10ms)
+    win_length: 200
+    n_mels: 80  # Number of mel filterbanks
+    whisper_model: large-v3
+    do_pad_trim: true
+    permute: true  # [batch, frames, dims]
+
+# SpecAug Configuration for 8kHz
+# Adjust frequency and time masking for narrowband audio
+specaug: SpecAugLFR
+specaug_conf:
+    apply_time_warp: false
+    time_warp_window: 5
+    time_warp_mode: bicubic
+    apply_freq_mask: true
+    freq_mask_width_range:
+        - 0
+        - 15  # Reduced from 30 for 8kHz (narrower frequency range)
+    lfr_rate: 6
+    num_freq_mask: 1
+    apply_time_mask: true
+    time_mask_width_range:
+        - 0
+        - 10  # Slightly reduced for telephone scenarios
+    num_time_mask: 1
+
+# Training Configuration
+train_conf:
+    accum_grad: 1  # Gradient accumulation steps
+    grad_clip: 5  # Gradient clipping
+    max_epoch: 20  # More epochs for fine-tuning
+    keep_nbest_models: 10
+    log_interval: 10
+    use_deepspeed: false  # Set to true when using DeepSpeed
+    deepspeed_config: null  # Path to DeepSpeed config
+
+# Optimizer Configuration
+# Lower learning rate to preserve pre-trained knowledge
+optim: adamw
+optim_conf:
+    lr: 0.00005  # 5e-5, lower learning rate for fine-tuning
+    weight_decay: 0.01
+    betas:
+        - 0.9
+        - 0.999
+
+# Learning Rate Scheduler
+scheduler: warmuplr
+scheduler_conf:
+    warmup_steps: 1000  # Gradual warmup
+
+# Dataset Configuration
+dataset: AudioLLMQwenAudioDataset
+dataset_conf:
+    index_ds: IndexDSJsonl
+    batch_sampler: CustomDistributedBatchSampler
+    batch_type: example  # "example" or "length"
+    batch_size: 4  # Adjust based on GPU memory
+    max_token_length: 3000  # Filter long samples
+    shuffle: true
+    num_workers: 4
+    preprocessor_text: TextPreprocessRemovePunctuation
+    audio_adaptor_downsample_rate: ${audio_adaptor_conf.downsample_rate}
+    audio_encoder_downsample_rate: 2
+
+# Tokenizer Configuration
+tokenizer: HuggingfaceTokenizer
+tokenizer_conf:
+    unk_symbol: <unk>
+    init_param_path: "Qwen/Qwen2.5-1.5B-Instruct"
+
+# Notes for 8kHz telephone fine-tuning:
+# 1. Ensure training data is simulated or real 8kHz telephone audio
+# 2. Consider using data augmentation with varying SNR levels
+# 3. Monitor training on validation set with real telephone recordings
+# 4. Adjust batch_size based on available GPU memory
+# 5. Use lower learning rate (5e-5) to preserve pre-trained knowledge
+# 6. Freeze early encoder layers (first 12) to retain general features
+# 7. Fine-tune later encoder layers and use LoRA for LLM to adapt to telephone domain
