@@ -138,7 +138,7 @@ class TelephoneChannelSimulator:
         if not self.bg_noise_list:
             return audio
         
-        # Randomly select a noise file using random.choice for better performance
+        # Randomly select a noise file
         noise_path = random.choice(self.bg_noise_list)
         
         # Load noise segment

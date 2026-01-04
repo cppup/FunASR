@@ -67,7 +67,10 @@ class SpeechPreprocessNoiseAug(nn.Module):
         if noise_scp and os.path.exists(noise_scp):
             self._load_noise_manifest()
         elif noise_scp:
-            logging.warning(f"Noise SCP file not found: {noise_scp}, noise augmentation will be disabled")
+            logging.warning(
+                f"Noise SCP file not found: {noise_scp}. "
+                "Please check the file path or set noise_scp=None to disable noise augmentation."
+            )
     
     def _load_noise_manifest(self):
         """Load noise manifest file in SCP format."""
@@ -105,15 +108,16 @@ class SpeechPreprocessNoiseAug(nn.Module):
                 resampler = torchaudio.transforms.Resample(noise_fs, fs)
                 noise = resampler(noise)
             
-            noise = noise.squeeze()
+            # Ensure 1D tensor
+            noise = noise.view(-1)
             
-            # If noise is shorter than target, repeat it
+            # If noise is shorter than target, tile it efficiently
             if len(noise) < target_length:
                 num_repeats = int(np.ceil(target_length / len(noise)))
-                noise = noise.repeat(num_repeats)[:target_length]
+                noise = torch.tile(noise, (num_repeats,))[:target_length]
             
             # If noise is longer, randomly crop it
-            if len(noise) > target_length:
+            elif len(noise) > target_length:
                 start_idx = random.randint(0, len(noise) - target_length)
                 noise = noise[start_idx:start_idx + target_length]
             
