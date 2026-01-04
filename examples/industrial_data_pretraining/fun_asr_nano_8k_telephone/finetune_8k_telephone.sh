@@ -8,11 +8,17 @@
 # This script demonstrates how to fine-tune Fun-ASR-Nano for 8kHz telephone
 # audio scenarios (customer service, sales calls, VoIP, etc.)
 #
+# Key approach:
+#   - Data simulation: 16kHz → 8kHz (telephone effects) → 16kHz (upsample)
+#   - Training: Standard 16kHz configuration with WavFrontend
+#   - Only CTC decoder is trainable; other components are frozen
+#   - This allows the model to learn 8kHz telephone channel characteristics
+#
 # Usage:
 #   bash finetune_8k_telephone.sh [stage]
 #
 # Stages:
-#   -1: Data simulation (convert 16kHz to 8kHz telephone audio)
+#   -1: Data simulation (convert 16kHz to 8kHz telephone audio, then upsample to 16kHz)
 #    0: Data preparation (prepare train/val JSONL files)
 #    1: Training/Fine-tuning
 #    2: Evaluation
@@ -43,11 +49,11 @@ echo "Workspace: ${workspace}"
 source_train_data="/path/to/16khz/train.jsonl"
 source_val_data="/path/to/16khz/val.jsonl"
 
-# Output: Simulated 8kHz telephone audio
+# Output: Simulated telephone audio (upsampled to 16kHz for WavFrontend compatibility)
 data_dir="${workspace}/data_8k_telephone"
 simulated_audio_dir="${data_dir}/audio"
-train_data="${data_dir}/train_8k.jsonl"
-val_data="${data_dir}/val_8k.jsonl"
+train_data="${data_dir}/train_telephone_16k.jsonl"
+val_data="${data_dir}/val_telephone_16k.jsonl"
 
 # ==============================================================================
 # Model and Training Configuration
@@ -89,11 +95,12 @@ DISTRIBUTED_ARGS="
 "
 
 # ==============================================================================
-# Stage -1: Data Simulation (16kHz -> 8kHz Telephone Audio)
+# Stage -1: Data Simulation (16kHz -> 8kHz Telephone -> 16kHz)
 # ==============================================================================
 if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
     echo "===================================================="
-    echo "Stage -1: Data Simulation (16kHz -> 8kHz Telephone)"
+    echo "Stage -1: Data Simulation"
+    echo "16kHz → 8kHz (telephone effects) → 16kHz (upsample)"
     echo "===================================================="
     
     mkdir -p "${data_dir}/audio_train"
@@ -108,12 +115,16 @@ if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
     
     # Simulate training data
     echo "Simulating training data..."
+    echo "  Input: 16kHz high-quality audio"
+    echo "  Process: Apply 8kHz telephone channel effects"
+    echo "  Output: 16kHz audio with telephone characteristics"
     python ${workspace}/data/data_simulation.py \
         --input "${source_train_data}" \
         --output "${train_data}" \
         --output_audio_dir "${data_dir}/audio_train" \
         --audio_key "source" \
         --target_fs 8000 \
+        --output_fs 16000 \
         --low_freq 300 \
         --high_freq 3400 \
         --codec_type "mu-law" \
@@ -130,6 +141,7 @@ if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
             --output_audio_dir "${data_dir}/audio_val" \
             --audio_key "source" \
             --target_fs 8000 \
+            --output_fs 16000 \
             --low_freq 300 \
             --high_freq 3400 \
             --codec_type "mu-law" \
@@ -145,6 +157,7 @@ if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
     echo "Data simulation completed!"
     echo "  Training data: ${train_data}"
     echo "  Validation data: ${val_data}"
+    echo "  Output format: 16kHz WAV with telephone channel characteristics"
 fi
 
 # ==============================================================================
