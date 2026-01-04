@@ -36,6 +36,8 @@ class TelephoneChannelSimulator:
         power_line_freq=50,
         add_noise=True,
         add_codec=True,
+        bg_noise_scp=None,
+        bg_noise_snr_range=(5, 20),
     ):
         """
         Initialize telephone channel simulator.
@@ -45,10 +47,12 @@ class TelephoneChannelSimulator:
             low_freq: Low cutoff frequency for bandpass filter (default: 300 Hz)
             high_freq: High cutoff frequency for bandpass filter (default: 3400 Hz)
             codec_type: Codec type, "mu-law" or "a-law" (default: "mu-law")
-            snr_db_range: SNR range in dB (default: (15, 25))
+            snr_db_range: SNR range in dB for telephone line noise (default: (15, 25))
             power_line_freq: Power line frequency in Hz, 50 or 60 (default: 50)
-            add_noise: Whether to add noise (default: True)
+            add_noise: Whether to add telephone line noise (default: True)
             add_codec: Whether to apply codec compression (default: True)
+            bg_noise_scp: Path to background noise SCP file (utt_id /path/to/noise/audio)
+            bg_noise_snr_range: SNR range in dB for background noise (default: (5, 20))
         """
         self.target_fs = target_fs
         self.low_freq = low_freq
@@ -58,6 +62,105 @@ class TelephoneChannelSimulator:
         self.power_line_freq = power_line_freq
         self.add_noise = add_noise
         self.add_codec = add_codec
+        self.bg_noise_scp = bg_noise_scp
+        self.bg_noise_snr_range = bg_noise_snr_range
+        self.bg_noise_list = []
+        
+        if bg_noise_scp and os.path.exists(bg_noise_scp):
+            self._load_noise_manifest()
+        elif bg_noise_scp:
+            print(f"Warning: Background noise SCP file not found: {bg_noise_scp}")
+    
+    def _load_noise_manifest(self):
+        """Load background noise manifest file in SCP format."""
+        try:
+            with open(self.bg_noise_scp, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split(maxsplit=1)
+                    if len(parts) == 2:
+                        utt_id, noise_path = parts
+                        if os.path.exists(noise_path):
+                            self.bg_noise_list.append(noise_path)
+                        else:
+                            print(f"Warning: Noise file not found: {noise_path}")
+            
+            print(f"Loaded {len(self.bg_noise_list)} background noise files from {self.bg_noise_scp}")
+        except Exception as e:
+            print(f"Error loading noise manifest: {e}")
+            self.bg_noise_list = []
+    
+    def _load_noise_segment(self, noise_path, target_length, fs):
+        """Load and prepare background noise segment."""
+        try:
+            # Load noise audio
+            noise, noise_fs = sf.read(noise_path)
+            
+            # Convert to mono if needed
+            if len(noise.shape) > 1:
+                noise = np.mean(noise, axis=1)
+            
+            # Resample if needed
+            if noise_fs != fs:
+                num_samples = int(len(noise) * fs / noise_fs)
+                noise = signal.resample(noise, num_samples)
+            
+            # If noise is shorter than target, repeat it
+            if len(noise) < target_length:
+                num_repeats = int(np.ceil(target_length / len(noise)))
+                noise = np.tile(noise, num_repeats)
+            
+            # If noise is longer, randomly crop it
+            if len(noise) > target_length:
+                start_idx = np.random.randint(0, len(noise) - target_length)
+                noise = noise[start_idx:start_idx + target_length]
+            
+            return noise
+        except Exception as e:
+            print(f"Warning: Error loading noise file {noise_path}: {e}")
+            return None
+    
+    def add_background_noise(self, audio, fs):
+        """
+        Add background noise to audio (simulates microphone picking up voice + background).
+        This should be applied BEFORE channel simulation and resampling.
+        
+        Args:
+            audio: Input audio signal
+            fs: Sampling rate
+        
+        Returns:
+            Audio with added background noise
+        """
+        if not self.bg_noise_list:
+            return audio
+        
+        # Randomly select a noise file
+        noise_path = np.random.choice(self.bg_noise_list)
+        
+        # Load noise segment
+        noise = self._load_noise_segment(noise_path, len(audio), fs)
+        if noise is None:
+            return audio
+        
+        # Calculate signal and noise power
+        signal_power = np.mean(audio ** 2)
+        noise_power = np.mean(noise ** 2)
+        
+        # Randomly select SNR within range
+        snr_db = np.random.uniform(self.bg_noise_snr_range[0], self.bg_noise_snr_range[1])
+        
+        # Calculate scaling factor for desired SNR
+        snr_linear = 10 ** (snr_db / 10)
+        scale = np.sqrt(signal_power / (noise_power * snr_linear))
+        
+        # Scale and add noise
+        scaled_noise = noise * scale
+        noisy_audio = audio + scaled_noise
+        
+        return noisy_audio
         
     def resample_audio(self, audio, orig_fs):
         """Resample audio to target sampling rate."""
@@ -189,6 +292,11 @@ class TelephoneChannelSimulator:
         """
         Apply complete telephone channel simulation.
         
+        The order of operations mimics real-world scenario:
+        1. Add background noise (microphone picks up voice + background)
+        2. Resample to 8kHz
+        3. Apply channel effects (bandpass filter, codec, telephone line noise)
+        
         Args:
             audio: Input audio signal
             orig_fs: Original sampling rate
@@ -196,6 +304,11 @@ class TelephoneChannelSimulator:
         Returns:
             Simulated telephone channel audio at target sampling rate
         """
+        # Step 0: Add background noise BEFORE channel simulation (real-world order)
+        # This simulates microphone picking up both voice and background noise
+        if self.bg_noise_list:
+            audio = self.add_background_noise(audio, orig_fs)
+        
         # Step 1: Resample to 8kHz
         audio = self.resample_audio(audio, orig_fs)
         
@@ -341,16 +454,24 @@ def main():
                         choices=['mu-law', 'a-law'],
                         help='Codec type (default: mu-law)')
     parser.add_argument('--snr_db_min', type=float, default=15,
-                        help='Minimum SNR in dB (default: 15)')
+                        help='Minimum SNR in dB for telephone line noise (default: 15)')
     parser.add_argument('--snr_db_max', type=float, default=25,
-                        help='Maximum SNR in dB (default: 25)')
+                        help='Maximum SNR in dB for telephone line noise (default: 25)')
     parser.add_argument('--power_line_freq', type=int, default=50,
                         choices=[50, 60],
                         help='Power line frequency in Hz (default: 50)')
     parser.add_argument('--no_noise', action='store_true',
-                        help='Disable noise addition')
+                        help='Disable telephone line noise addition')
     parser.add_argument('--no_codec', action='store_true',
                         help='Disable codec compression')
+    
+    # Background noise parameters
+    parser.add_argument('--bg_noise_scp', type=str, default=None,
+                        help='Path to background noise SCP file (utt_id /path/to/noise/audio)')
+    parser.add_argument('--bg_noise_snr_min', type=float, default=5,
+                        help='Minimum SNR in dB for background noise (default: 5)')
+    parser.add_argument('--bg_noise_snr_max', type=float, default=20,
+                        help='Maximum SNR in dB for background noise (default: 20)')
     
     args = parser.parse_args()
     
@@ -364,6 +485,8 @@ def main():
         power_line_freq=args.power_line_freq,
         add_noise=not args.no_noise,
         add_codec=not args.no_codec,
+        bg_noise_scp=args.bg_noise_scp,
+        bg_noise_snr_range=(args.bg_noise_snr_min, args.bg_noise_snr_max),
     )
     
     # Check if input is JSONL
@@ -377,8 +500,11 @@ def main():
         print(f"  Target fs: {args.target_fs} Hz")
         print(f"  Bandpass: {args.low_freq}-{args.high_freq} Hz")
         print(f"  Codec: {args.codec_type} (enabled: {not args.no_codec})")
-        print(f"  Noise: {args.snr_db_min}-{args.snr_db_max} dB SNR (enabled: {not args.no_noise})")
+        print(f"  Telephone line noise: {args.snr_db_min}-{args.snr_db_max} dB SNR (enabled: {not args.no_noise})")
         print(f"  Power line: {args.power_line_freq} Hz")
+        if args.bg_noise_scp:
+            print(f"  Background noise: {args.bg_noise_scp}")
+            print(f"  Background noise SNR: {args.bg_noise_snr_min}-{args.bg_noise_snr_max} dB")
         print()
         
         process_jsonl(

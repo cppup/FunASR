@@ -70,7 +70,10 @@ python data/data_simulation.py \
     --codec_type mu-law \
     --snr_db_min 15 \
     --snr_db_max 25 \
-    --power_line_freq 50
+    --power_line_freq 50 \
+    --bg_noise_scp /path/to/noise.scp \
+    --bg_noise_snr_min 5 \
+    --bg_noise_snr_max 20
 ```
 
 **参数说明：**
@@ -85,18 +88,22 @@ python data/data_simulation.py \
 | `--low_freq` | 带通滤波器低频截止（Hz） | `300` |
 | `--high_freq` | 带通滤波器高频截止（Hz） | `3400` |
 | `--codec_type` | 编解码类型（`mu-law` 或 `a-law`） | `mu-law` |
-| `--snr_db_min` | 最小信噪比（dB） | `15` |
-| `--snr_db_max` | 最大信噪比（dB） | `25` |
+| `--snr_db_min` | 电话线路噪声最小信噪比（dB） | `15` |
+| `--snr_db_max` | 电话线路噪声最大信噪比（dB） | `25` |
 | `--power_line_freq` | 工频干扰频率（50 或 60 Hz） | `50` |
-| `--no_noise` | 禁用噪声添加 | `False` |
+| `--no_noise` | 禁用电话线路噪声添加 | `False` |
 | `--no_codec` | 禁用编解码压扩 | `False` |
+| `--bg_noise_scp` | 背景噪声 SCP 文件路径（格式：utt_id /path/to/noise/audio） | `None` |
+| `--bg_noise_snr_min` | 背景噪声最小信噪比（dB） | `5` |
+| `--bg_noise_snr_max` | 背景噪声最大信噪比（dB） | `20` |
 
 **数据模拟流程：**
 
-1. 下采样到 8kHz
-2. 应用 300-3400 Hz 带通滤波器（模拟电话线路频率响应）
-3. 应用 G.711 μ-law/A-law 编解码压扩
-4. 添加电话线路噪声（白噪声 + 50/60Hz 工频干扰）
+1. 添加背景噪声（可选，模拟麦克风拾取人声和背景噪音）
+2. 下采样到 8kHz
+3. 应用 300-3400 Hz 带通滤波器（模拟电话线路频率响应）
+4. 应用 G.711 μ-law/A-law 编解码压扩
+5. 添加电话线路噪声（白噪声 + 50/60Hz 工频干扰）
 
 ### 2. 模型微调训练
 
