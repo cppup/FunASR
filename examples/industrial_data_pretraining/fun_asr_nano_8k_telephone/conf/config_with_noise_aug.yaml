@@ -1,0 +1,32 @@
+# Copyright FunASR (https://github.com/alibaba-damo-academy/FunASR). All Rights Reserved.
+#  MIT License  (https://opensource.org/licenses/MIT)
+
+# Example configuration showing how to use background noise augmentation
+# This is a snippet that can be added to config_8k_telephone.yaml
+
+# Dataset Configuration with Noise Augmentation
+dataset_conf:
+    # ... other dataset configurations ...
+    
+    # Enable speech preprocessing with noise augmentation
+    preprocessor_speech: SpeechPreprocessNoiseAug
+    preprocessor_speech_conf:
+        # Path to noise manifest file in SCP format (utt_id /path/to/noise/audio)
+        # Example: /data/speech/open/data/noise/manifests/musan_noise/noise.scp
+        noise_scp: /path/to/noise.scp
+        
+        # SNR range in dB for background noise
+        # Random SNR will be selected from this range for each sample
+        snr_range: [5, 20]
+        
+        # Probability of applying noise augmentation (0.0 to 1.0)
+        # 0.8 means 80% of samples will have noise added
+        noise_apply_prob: 0.8
+
+# Note: The noise augmentation happens before any channel simulation or resampling,
+# which matches the real-world scenario where microphone picks up both voice and background noise.
+
+# Example noise.scp file format:
+# noise-sound-0001 /data/noise/musan/noise/free-sound/noise-free-sound-0001.wav
+# noise-sound-0002 /data/noise/musan/noise/free-sound/noise-free-sound-0002.wav
+# noise-sound-0003 /data/noise/musan/noise/sound-bible/noise-sound-bible-0001.wav

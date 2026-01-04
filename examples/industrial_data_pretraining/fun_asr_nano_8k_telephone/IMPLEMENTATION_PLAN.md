@@ -202,15 +202,20 @@ tokenizer_conf:
 init_param: "FunAudioLLM/Fun-ASR-Nano-2512/model.pt"
 ```
 
-### Step 2: 修改训练脚本 - 添加音频上采样逻辑
+### Step 2: 修改训练脚本 - 添加音频上采样逻辑和背景噪声增强
 
-**方案A: 在数据预处理时上采样（推荐）**
+**方案A: 在数据预处理时上采样（推荐）** ✅ 已实现
 
 修改 `data/data_simulation.py`，在生成8kHz数据后，额外保存16kHz版本：
 
 ```python
 def process_audio(self, audio, sr):
-    """处理音频：降采样 → 电话效果 → 上采样回16kHz"""
+    """处理音频：背景噪声 → 降采样 → 电话效果 → 上采样回16kHz"""
+    
+    # 0. 添加背景噪声（模拟麦克风拾取人声和背景噪音）
+    # 这一步发生在信道模拟和降采样之前，符合真实场景
+    if self.bg_noise_list:
+        audio = self.add_background_noise(audio, sr)
     
     # 1. 降采样到8kHz（如果需要）
     if sr != self.target_fs:
@@ -223,7 +228,7 @@ def process_audio(self, audio, sr):
     if self.add_codec:
         audio = self.apply_codec(audio)
     
-    # 4. 添加噪声
+    # 4. 添加电话线路噪声
     if self.add_noise:
         audio = self.add_telephone_noise(audio)
     
@@ -233,24 +238,57 @@ def process_audio(self, audio, sr):
     return audio_16k  # 返回16kHz，但保留了电话特征
 ```
 
-**方案B: 在数据加载时上采样**
+**新增功能：背景噪声增强** ✅
 
-创建自定义 Dataset，在 `__getitem__` 中上采样：
+支持从噪声清单文件（SCP 格式）添加背景噪声：
 
-```python
-# 在 funasr/datasets/ 中添加
-class TelephoneDataset:
-    def __getitem__(self, idx):
-        # 加载8kHz音频
-        audio, sr = torchaudio.load(audio_path)
-        
-        # 上采样到16kHz
-        if sr == 8000:
-            resampler = torchaudio.transforms.Resample(8000, 16000)
-            audio = resampler(audio)
-        
-        return audio, text
+```bash
+python data/data_simulation.py \
+    --input /path/to/train.jsonl \
+    --output /path/to/train_8k.jsonl \
+    --output_audio_dir /path/to/audio \
+    --bg_noise_scp /data/speech/open/data/noise/manifests/musan_noise/noise.scp \
+    --bg_noise_snr_min 5 \
+    --bg_noise_snr_max 20
 ```
+
+**噪声清单文件格式（SCP）：**
+```
+noise-sound-0001 /path/to/noise/audio1.wav
+noise-sound-0002 /path/to/noise/audio2.wav
+noise-sound-0003 /path/to/noise/audio3.wav
+```
+
+**特性：**
+- 随机选择噪声文件
+- 随机 SNR 比例（在指定范围内）
+- 自动处理噪声长度（重复或裁剪）
+- 自动重采样到匹配采样率
+- 发生在信道模拟和降采样之前，符合真实场景（麦克风拾音 → 信道传输）
+
+**方案B: 在数据加载时上采样（运行时增强）** ✅ 已实现
+
+在训练配置中使用 `SpeechPreprocessNoiseAug` 预处理器：
+
+```yaml
+# config_8k_telephone.yaml
+dataset_conf:
+  preprocessor_speech: SpeechPreprocessNoiseAug
+  preprocessor_speech_conf:
+    noise_scp: /data/speech/open/data/noise/manifests/musan_noise/noise.scp
+    snr_range: [5, 20]
+    noise_apply_prob: 0.8  # 80% 概率应用噪声增强
+```
+
+**优势：**
+- 无需提前生成带噪声的数据
+- 每个 epoch 噪声不同，增强数据多样性
+- 可以动态调整噪声参数
+- 节省存储空间
+
+**使用场景：**
+- 方案A：离线数据准备，适合固定数据集
+- 方案B：在线数据增强，适合动态训练
 
 ### Step 3: 训练脚本修改
 
