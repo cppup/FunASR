@@ -34,6 +34,8 @@ from funasr.train_utils.load_pretrained_model import load_pretrained_model
 from funasr.utils.misc import prepare_model_dir
 from funasr.train_utils.model_summary import model_summary
 from funasr import AutoModel
+# Ensure FunASRNano model is registered
+from funasr.models.fun_asr_nano.model import FunASRNano
 
 try:
     import deepspeed
