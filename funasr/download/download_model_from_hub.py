@@ -6,6 +6,34 @@ from omegaconf import OmegaConf, DictConfig
 from funasr.download.name_maps_from_hub import name_maps_ms, name_maps_hf, name_maps_openai
 
 
+def resolve_relative_paths(kwargs, model_path):
+    """Resolve relative paths in llm_conf and tokenizer_conf to absolute paths.
+    
+    Args:
+        kwargs: Configuration dictionary
+        model_path: Base model directory path for resolving relative paths
+    """
+    # Handle relative paths in llm_conf
+    if "llm_conf" in kwargs and "init_param_path" in kwargs["llm_conf"]:
+        llm_init_path = kwargs["llm_conf"]["init_param_path"]
+        if llm_init_path and not os.path.isabs(llm_init_path):
+            abs_llm_path = os.path.join(model_path, llm_init_path)
+            if os.path.exists(abs_llm_path):
+                kwargs["llm_conf"]["init_param_path"] = abs_llm_path
+                logging.info(f"Resolved llm init_param_path to: {abs_llm_path}")
+    
+    # Handle relative paths in tokenizer_conf
+    if "tokenizer_conf" in kwargs and "init_param_path" in kwargs["tokenizer_conf"]:
+        tokenizer_init_path = kwargs["tokenizer_conf"]["init_param_path"]
+        if tokenizer_init_path and not os.path.isabs(tokenizer_init_path):
+            abs_tokenizer_path = os.path.join(model_path, tokenizer_init_path)
+            if os.path.exists(abs_tokenizer_path):
+                kwargs["tokenizer_conf"]["init_param_path"] = abs_tokenizer_path
+                logging.info(f"Resolved tokenizer init_param_path to: {abs_tokenizer_path}")
+    
+    return kwargs
+
+
 def download_model(**kwargs):
     hub = kwargs.get("hub", "ms")
     if hub == "ms" or hub == "modelscope":

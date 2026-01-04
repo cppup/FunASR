@@ -58,6 +58,26 @@ def main_hydra(kwargs: DictConfig):
                 logging.info(f"Model found in cache: {model_cache_path}")
                 kwargs["check_latest"] = False  # Skip update check for cached models
         kwargs = download_model(is_training=kwargs.get("is_training", True), **kwargs)
+    else:
+        # When loading from local config, resolve relative paths
+        # Look for pretrained model in modelscope cache to resolve relative paths
+        pretrained_model = kwargs.get("pretrained_model", None)
+        if pretrained_model is None:
+            modelscope_cache = os.environ.get("MODELSCOPE_CACHE", os.path.expanduser("~/.cache/modelscope"))
+            # Try common model locations
+            possible_paths = [
+                os.path.join(modelscope_cache, "models", "FunAudioLLM", "Fun-ASR-Nano-2512"),
+                os.path.join(modelscope_cache, "hub", "FunAudioLLM", "Fun-ASR-Nano-2512"),
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    pretrained_model = path
+                    break
+        
+        if pretrained_model and os.path.exists(pretrained_model):
+            from funasr.download.download_model_from_hub import resolve_relative_paths
+            logging.info(f"Using pretrained model path: {pretrained_model}")
+            kwargs = resolve_relative_paths(kwargs, pretrained_model)
 
     main(**kwargs)
 
