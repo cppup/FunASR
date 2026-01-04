@@ -106,7 +106,8 @@ class TelephoneChannelSimulator:
         
         # μ-law decompression
         normalized = quantized.astype(np.float32) / 127.5 - 1
-        decompressed = sign * (np.power(1 + mu, np.abs(normalized)) - 1) / mu
+        sign_norm = np.sign(normalized)
+        decompressed = sign_norm * (np.power(1 + mu, np.abs(normalized)) - 1) / mu
         
         return decompressed
     
@@ -139,12 +140,13 @@ class TelephoneChannelSimulator:
         
         # A-law decompression
         normalized = quantized.astype(np.float32) / 127.5 - 1
+        sign_norm = np.sign(normalized)
         decompressed = np.zeros_like(normalized)
         
         threshold = 1 / (1 + np.log(A))
         mask = np.abs(normalized) < threshold
-        decompressed[mask] = sign[mask] * np.abs(normalized[mask]) * (1 + np.log(A)) / A
-        decompressed[~mask] = sign[~mask] * np.exp(np.abs(normalized[~mask]) * (1 + np.log(A)) - 1) / A
+        decompressed[mask] = sign_norm[mask] * np.abs(normalized[mask]) * (1 + np.log(A)) / A
+        decompressed[~mask] = sign_norm[~mask] * (np.exp(np.abs(normalized[~mask]) * (1 + np.log(A)) - 1) - 1) / A
         
         return decompressed
     
