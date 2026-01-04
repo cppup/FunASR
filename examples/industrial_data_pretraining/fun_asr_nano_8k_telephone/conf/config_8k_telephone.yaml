@@ -6,10 +6,18 @@
 # Note: Audio is upsampled from 8kHz to 16kHz to work with WavFrontend
 
 # Network architecture
+# For training from scratch or fine-tuning with custom config, uncomment model_conf:
 model: FunASRNano
 model_conf:
     lsm_weight: 0.1  # Label smoothing
     length_normalized_loss: true
+
+# For loading pretrained model from hub, use one of these:
+# model: FunAudioLLM/Fun-ASR-Nano-2512  # Download from ModelScope
+# hub: ms  # Use ModelScope hub (default)
+# or
+# model: FunAudioLLM/Fun-ASR-Nano-2512  # Download from HuggingFace
+# hub: hf  # Use HuggingFace hub
 
 # Audio Encoder Configuration
 # Using SenseVoiceEncoderSmall (not Whisper)

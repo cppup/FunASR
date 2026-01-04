@@ -1,0 +1,49 @@
+# Copyright FunASR (https://github.com/alibaba-damo-academy/FunASR). All Rights Reserved.
+#  MIT License  (https://opensource.org/licenses/MIT)
+
+# Configuration file for Fun-ASR-Nano 8kHz telephone channel fine-tuning
+# This configuration loads the pretrained model from ModelScope/HuggingFace hub
+# Note: Audio is upsampled from 8kHz to 16kHz to work with WavFrontend
+
+# Network architecture - Load from hub
+model: FunAudioLLM/Fun-ASR-Nano-2512
+hub: ms  # Use ModelScope hub (or 'hf' for HuggingFace)
+
+# When loading from hub, the model architecture is loaded from the hub's config.yaml
+# You can override specific parameters here:
+
+# Override CTC decoder to make it trainable
+ctc_decoder_conf:
+  freeze: false
+
+# Training Configuration
+train_conf:
+  accum_grad: 1
+  grad_clip: 5
+  max_epoch: 20
+  keep_nbest_models: 10
+  log_interval: 10
+  use_deepspeed: false
+  deepspeed_config: null
+
+# Optimizer Configuration
+optim: adamw
+optim_conf:
+  lr: 0.00005
+  weight_decay: 0.01
+
+# Learning Rate Scheduler
+scheduler: warmuplr
+scheduler_conf:
+  warmup_steps: 1000
+
+# Dataset Configuration
+dataset_conf:
+  batch_size: 4096
+  num_workers: 32
+  shuffle: true
+
+# Training data
+train_data_set_list: null
+valid_data_set_list: null
+output_dir: null
