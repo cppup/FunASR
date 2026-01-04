@@ -6,6 +6,10 @@
 """
 Inference script for Fun-ASR-Nano 8kHz telephone channel model.
 Supports single file, batch, and JSONL evaluation with CER/WER metrics.
+
+For 8kHz input audio:
+- Automatically upsamples to 16kHz before inference
+- Preserves telephone channel characteristics in the upsampled audio
 """
 
 import argparse
@@ -15,8 +19,49 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
+import soundfile as sf
 import torch
 from funasr import AutoModel
+from scipy import signal
+
+
+def resample_audio(audio_path, target_fs=16000):
+    """
+    Load and resample audio to target sampling rate if needed.
+    
+    Args:
+        audio_path: Path to audio file
+        target_fs: Target sampling rate (default: 16000)
+    
+    Returns:
+        Tuple of (audio_path, needs_cleanup) where needs_cleanup indicates
+        if a temporary file was created that should be deleted after use
+    """
+    # Load audio
+    audio, orig_fs = sf.read(audio_path)
+    
+    # Convert to mono if stereo
+    if len(audio.shape) > 1:
+        audio = np.mean(audio, axis=1)
+    
+    # Check if resampling is needed
+    if orig_fs == target_fs:
+        return audio_path, False
+    
+    # Resample to target_fs
+    print(f"  Resampling {audio_path} from {orig_fs} Hz to {target_fs} Hz")
+    num_samples = int(len(audio) * target_fs / orig_fs)
+    audio_resampled = signal.resample(audio, num_samples)
+    
+    # Save to temporary file
+    temp_dir = "/tmp/funasr_inference"
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_filename = os.path.basename(audio_path)
+    temp_path = os.path.join(temp_dir, f"resampled_{temp_filename}")
+    sf.write(temp_path, audio_resampled, target_fs)
+    
+    return temp_path, True
 
 
 def compute_cer(ref, hyp):
@@ -89,7 +134,7 @@ def compute_wer(ref, hyp):
     return d[len(ref_words)][len(hyp_words)] / len(ref_words)
 
 
-def inference_single_file(model, audio_path, hotwords=None):
+def inference_single_file(model, audio_path, hotwords=None, target_fs=16000):
     """
     Perform inference on a single audio file.
     
@@ -97,24 +142,33 @@ def inference_single_file(model, audio_path, hotwords=None):
         model: AutoModel instance
         audio_path: Path to audio file
         hotwords: Optional hotwords for biased decoding
+        target_fs: Target sampling rate (default: 16000)
     
     Returns:
         Recognition result
     """
     try:
+        # Resample if needed
+        processed_path, needs_cleanup = resample_audio(audio_path, target_fs)
+        
         res = model.generate(
-            input=[audio_path],
+            input=[processed_path],
             cache={},
             batch_size=1,
             hotwords=hotwords,
         )
+        
+        # Clean up temporary file if created
+        if needs_cleanup and os.path.exists(processed_path):
+            os.remove(processed_path)
+        
         return res[0] if res else None
     except Exception as e:
         print(f"Error processing {audio_path}: {e}")
         return None
 
 
-def inference_batch(model, audio_paths, batch_size=1, hotwords=None):
+def inference_batch(model, audio_paths, batch_size=1, hotwords=None, target_fs=16000):
     """
     Perform batch inference on multiple audio files.
     
@@ -123,26 +177,45 @@ def inference_batch(model, audio_paths, batch_size=1, hotwords=None):
         audio_paths: List of audio file paths
         batch_size: Batch size for inference
         hotwords: Optional hotwords for biased decoding
+        target_fs: Target sampling rate (default: 16000)
     
     Returns:
         List of recognition results
     """
     results = []
+    temp_files = []
     
-    for i in range(0, len(audio_paths), batch_size):
-        batch = audio_paths[i:i+batch_size]
-        
-        try:
-            res = model.generate(
-                input=batch,
-                cache={},
-                batch_size=len(batch),
-                hotwords=hotwords,
-            )
-            results.extend(res)
-        except Exception as e:
-            print(f"Error processing batch {i//batch_size}: {e}")
-            results.extend([None] * len(batch))
+    try:
+        for i in range(0, len(audio_paths), batch_size):
+            batch = audio_paths[i:i+batch_size]
+            batch_processed = []
+            batch_temp_files = []
+            
+            # Resample all files in batch if needed
+            for audio_path in batch:
+                processed_path, needs_cleanup = resample_audio(audio_path, target_fs)
+                batch_processed.append(processed_path)
+                if needs_cleanup:
+                    batch_temp_files.append(processed_path)
+            
+            try:
+                res = model.generate(
+                    input=batch_processed,
+                    cache={},
+                    batch_size=len(batch_processed),
+                    hotwords=hotwords,
+                )
+                results.extend(res)
+            except Exception as e:
+                print(f"Error processing batch {i//batch_size}: {e}")
+                results.extend([None] * len(batch))
+            finally:
+                # Clean up temporary files for this batch
+                for temp_file in batch_temp_files:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+    except Exception as e:
+        print(f"Error in batch inference: {e}")
     
     return results
 
@@ -155,6 +228,7 @@ def inference_jsonl(
     hotwords=None,
     audio_key="source",
     text_key="target",
+    target_fs=16000,
 ):
     """
     Perform inference on JSONL dataset and compute metrics.
@@ -167,6 +241,7 @@ def inference_jsonl(
         hotwords: Optional hotwords for biased decoding
         audio_key: Key in JSONL for audio file path
         text_key: Key in JSONL for reference text
+        target_fs: Target sampling rate (default: 16000)
     
     Returns:
         Dictionary with metrics and results
@@ -196,7 +271,7 @@ def inference_jsonl(
     
     # Perform inference
     start_time = time.time()
-    results = inference_batch(model, audio_paths, batch_size=batch_size, hotwords=hotwords)
+    results = inference_batch(model, audio_paths, batch_size=batch_size, hotwords=hotwords, target_fs=target_fs)
     elapsed_time = time.time() - start_time
     
     # Compute metrics
@@ -309,6 +384,8 @@ def main():
                         help='Batch size for inference')
     parser.add_argument('--hotwords', type=str, default=None,
                         help='Hotwords for biased decoding (comma-separated)')
+    parser.add_argument('--target_fs', type=int, default=16000,
+                        help='Target sampling rate for resampling (default: 16000)')
     
     # JSONL keys
     parser.add_argument('--audio_key', type=str, default='source',
@@ -360,7 +437,7 @@ def main():
     if args.audio_file:
         # Single file inference
         print(f"\nInference on single file: {args.audio_file}")
-        result = inference_single_file(model, args.audio_file, hotwords=hotwords)
+        result = inference_single_file(model, args.audio_file, hotwords=hotwords, target_fs=args.target_fs)
         
         if result:
             print(f"\nRecognition result:")
@@ -383,7 +460,7 @@ def main():
             audio_paths = [line.strip() for line in f if line.strip()]
         
         print(f"Processing {len(audio_paths)} audio files...")
-        results = inference_batch(model, audio_paths, batch_size=args.batch_size, hotwords=hotwords)
+        results = inference_batch(model, audio_paths, batch_size=args.batch_size, hotwords=hotwords, target_fs=args.target_fs)
         
         # Save results
         os.makedirs(args.output_dir, exist_ok=True)
@@ -409,6 +486,7 @@ def main():
             hotwords=hotwords,
             audio_key=args.audio_key,
             text_key=args.text_key,
+            target_fs=args.target_fs,
         )
         
     else:

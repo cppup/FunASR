@@ -5,11 +5,13 @@
 
 """
 Data simulation tool for 8kHz telephone channel audio.
-Converts high-quality 16kHz audio to 8kHz telephone channel simulated audio with:
+Converts high-quality 16kHz audio to telephone channel simulated audio with:
 - Downsampling to 8kHz
 - 300Hz-3400Hz bandpass filter (telephone line frequency response)
 - G.711 (μ-law/A-law) codec compression simulation
 - Telephone line noise (white noise + 50/60Hz power line interference)
+- Upsampling back to 16kHz (preserves telephone channel characteristics while
+  maintaining compatibility with WavFrontend which requires 16kHz input)
 """
 
 import argparse
@@ -29,6 +31,7 @@ class TelephoneChannelSimulator:
     def __init__(
         self,
         target_fs=8000,
+        output_fs=16000,
         low_freq=300,
         high_freq=3400,
         codec_type="mu-law",
@@ -41,7 +44,8 @@ class TelephoneChannelSimulator:
         Initialize telephone channel simulator.
         
         Args:
-            target_fs: Target sampling rate (default: 8000 Hz)
+            target_fs: Target sampling rate for telephone simulation (default: 8000 Hz)
+            output_fs: Final output sampling rate (default: 16000 Hz)
             low_freq: Low cutoff frequency for bandpass filter (default: 300 Hz)
             high_freq: High cutoff frequency for bandpass filter (default: 3400 Hz)
             codec_type: Codec type, "mu-law" or "a-law" (default: "mu-law")
@@ -51,6 +55,7 @@ class TelephoneChannelSimulator:
             add_codec: Whether to apply codec compression (default: True)
         """
         self.target_fs = target_fs
+        self.output_fs = output_fs
         self.low_freq = low_freq
         self.high_freq = high_freq
         self.codec_type = codec_type
@@ -59,13 +64,15 @@ class TelephoneChannelSimulator:
         self.add_noise = add_noise
         self.add_codec = add_codec
         
-    def resample_audio(self, audio, orig_fs):
+    def resample_audio(self, audio, orig_fs, target_fs=None):
         """Resample audio to target sampling rate."""
-        if orig_fs == self.target_fs:
+        if target_fs is None:
+            target_fs = self.target_fs
+        if orig_fs == target_fs:
             return audio
         
         # Use polyphase filtering for high-quality resampling
-        num_samples = int(len(audio) * self.target_fs / orig_fs)
+        num_samples = int(len(audio) * target_fs / orig_fs)
         resampled = signal.resample(audio, num_samples)
         return resampled
     
@@ -194,7 +201,7 @@ class TelephoneChannelSimulator:
             orig_fs: Original sampling rate
         
         Returns:
-            Simulated telephone channel audio at target sampling rate
+            Simulated telephone channel audio at output sampling rate (16kHz)
         """
         # Step 1: Resample to 8kHz
         audio = self.resample_audio(audio, orig_fs)
@@ -223,6 +230,11 @@ class TelephoneChannelSimulator:
         if max_val > 0:
             audio = audio / max_val * 0.95
         
+        # Step 7: Upsample to output_fs (16kHz) to preserve telephone characteristics
+        # while being compatible with WavFrontend
+        if self.output_fs != self.target_fs:
+            audio = self.resample_audio(audio, self.target_fs, target_fs=self.output_fs)
+        
         return audio
 
 
@@ -241,7 +253,7 @@ def process_audio_file(input_path, output_path, simulator):
         
         # Save simulated audio
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        sf.write(output_path, simulated, simulator.target_fs)
+        sf.write(output_path, simulated, simulator.output_fs)
         
         return True, None
     except Exception as e:
@@ -332,7 +344,9 @@ def main():
     
     # Simulation parameters
     parser.add_argument('--target_fs', type=int, default=8000,
-                        help='Target sampling rate (default: 8000)')
+                        help='Target sampling rate for telephone simulation (default: 8000)')
+    parser.add_argument('--output_fs', type=int, default=16000,
+                        help='Final output sampling rate (default: 16000)')
     parser.add_argument('--low_freq', type=int, default=300,
                         help='Low cutoff frequency for bandpass filter (default: 300)')
     parser.add_argument('--high_freq', type=int, default=3400,
@@ -357,6 +371,7 @@ def main():
     # Initialize simulator
     simulator = TelephoneChannelSimulator(
         target_fs=args.target_fs,
+        output_fs=args.output_fs,
         low_freq=args.low_freq,
         high_freq=args.high_freq,
         codec_type=args.codec_type,
@@ -374,7 +389,8 @@ def main():
         
         print(f"Processing JSONL: {args.input}")
         print(f"Simulation parameters:")
-        print(f"  Target fs: {args.target_fs} Hz")
+        print(f"  Telephone simulation fs: {args.target_fs} Hz")
+        print(f"  Output fs: {args.output_fs} Hz")
         print(f"  Bandpass: {args.low_freq}-{args.high_freq} Hz")
         print(f"  Codec: {args.codec_type} (enabled: {not args.no_codec})")
         print(f"  Noise: {args.snr_db_min}-{args.snr_db_max} dB SNR (enabled: {not args.no_noise})")
