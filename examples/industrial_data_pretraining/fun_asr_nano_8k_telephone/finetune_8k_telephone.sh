@@ -75,7 +75,8 @@ val_data="${data_dir}/val_telecall_16k.jsonl"
 # ==============================================================================
 
 # Configuration file
-config="config_8k_telephone.yaml"
+# config="config_8k_telephone.yaml"
+config="config_8k_telephone_from_hub.yaml"
 
 # Output directory for checkpoints and logs
 exp_name="fun_asr_nano_8k_telephone_$(date +%Y%m%d_%H%M%S)"

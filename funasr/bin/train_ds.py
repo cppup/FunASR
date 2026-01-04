@@ -51,6 +51,16 @@ def main_hydra(kwargs: DictConfig):
     assert "model" in kwargs
     if "model_conf" not in kwargs:
         logging.info("download models from model hub: {}".format(kwargs.get("hub", "ms")))
+        # Disable check_latest if model is already in cache to speed up training startup
+        model_name = kwargs.get("model", "")
+        hub = kwargs.get("hub", "ms")
+        if hub in ["ms", "modelscope"]:
+            modelscope_cache = os.environ.get("MODELSCOPE_CACHE", os.path.expanduser("~/.cache/modelscope"))
+            # Check if model is already cached
+            model_cache_path = os.path.join(modelscope_cache, "models", model_name.replace("/", "/"))
+            if os.path.exists(model_cache_path):
+                logging.info(f"Model found in cache: {model_cache_path}")
+                kwargs["check_latest"] = False  # Skip update check for cached models
         kwargs = download_model(is_training=kwargs.get("is_training", True), **kwargs)
     else:
         # Handle relative paths in llm_conf and tokenizer_conf when loading from local config
