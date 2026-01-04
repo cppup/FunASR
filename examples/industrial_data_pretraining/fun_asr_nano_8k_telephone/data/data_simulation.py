@@ -19,6 +19,8 @@ import json
 import os
 import sys
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import cpu_count
 
 import numpy as np
 import soundfile as sf
@@ -260,9 +262,29 @@ def process_audio_file(input_path, output_path, simulator):
         return False, str(e)
 
 
-def process_jsonl(input_jsonl, output_jsonl, output_audio_dir, simulator, audio_key="source"):
+def _process_audio_worker(args):
+    """Worker function for parallel processing of audio files.
+    
+    Args:
+        args: Tuple of (input_path, output_path, simulator_params)
+    
+    Returns:
+        Tuple of (line_no, input_path, output_path, success, error)
     """
-    Process audio files listed in JSONL format.
+    line_no, input_path, output_path, simulator_params = args
+    
+    try:
+        # Recreate simulator in worker process
+        simulator = TelephoneChannelSimulator(**simulator_params)
+        success, error = process_audio_file(input_path, output_path, simulator)
+        return (line_no, input_path, output_path, success, error)
+    except Exception as e:
+        return (line_no, input_path, output_path, False, str(e))
+
+
+def process_jsonl(input_jsonl, output_jsonl, output_audio_dir, simulator, audio_key="source", num_workers=64):
+    """
+    Process audio files listed in JSONL format (with optional parallel processing).
     
     Args:
         input_jsonl: Input JSONL file path
@@ -270,24 +292,37 @@ def process_jsonl(input_jsonl, output_jsonl, output_audio_dir, simulator, audio_
         output_audio_dir: Output directory for simulated audio files
         simulator: TelephoneChannelSimulator instance
         audio_key: Key in JSONL for audio file path (default: "source")
+        num_workers: Number of parallel workers (default: 64, set to 1 for serial processing)
     """
     os.makedirs(output_audio_dir, exist_ok=True)
     os.makedirs(os.path.dirname(output_jsonl), exist_ok=True)
     
-    success_count = 0
-    fail_count = 0
+    # Prepare simulator parameters for worker processes
+    simulator_params = {
+        'target_fs': simulator.target_fs,
+        'output_fs': simulator.output_fs,
+        'low_freq': simulator.low_freq,
+        'high_freq': simulator.high_freq,
+        'codec_type': simulator.codec_type,
+        'snr_db_range': simulator.snr_db_range,
+        'power_line_freq': simulator.power_line_freq,
+        'add_noise': simulator.add_noise,
+        'add_codec': simulator.add_codec,
+    }
     
-    with open(input_jsonl, 'r', encoding='utf-8') as fin, \
-         open(output_jsonl, 'w', encoding='utf-8') as fout:
-        
+    # Read input JSONL and prepare tasks
+    tasks = []
+    jsonl_data = []
+    
+    with open(input_jsonl, 'r', encoding='utf-8') as fin:
         for line_no, line in enumerate(fin, 1):
             try:
                 data = json.loads(line.strip())
+                jsonl_data.append((line_no, data))
                 
                 # Get input audio path
                 if audio_key not in data:
                     print(f"Line {line_no}: Missing key '{audio_key}', skipping")
-                    fail_count += 1
                     continue
                 
                 input_path = data[audio_key]
@@ -298,27 +333,66 @@ def process_jsonl(input_jsonl, output_jsonl, output_audio_dir, simulator, audio_
                 output_filename = f"{name}_8k{ext}"
                 output_path = os.path.join(output_audio_dir, output_filename)
                 
-                # Process audio
-                success, error = process_audio_file(input_path, output_path, simulator)
+                tasks.append((line_no, input_path, output_path, simulator_params))
                 
+            except json.JSONDecodeError as e:
+                print(f"Line {line_no}: JSON decode error: {e}")
+    
+    success_count = 0
+    fail_count = 0
+    results = {}  # Store results by line_no
+    
+    # Process tasks in parallel
+    if num_workers > 1:
+        print(f"Processing {len(tasks)} audio files with {num_workers} workers...")
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = {executor.submit(_process_audio_worker, task): task[0] for task in tasks}
+            
+            completed = 0
+            for future in as_completed(futures):
+                try:
+                    line_no, input_path, output_path, success, error = future.result()
+                    results[line_no] = (input_path, output_path, success, error)
+                    
+                    if success:
+                        success_count += 1
+                    else:
+                        fail_count += 1
+                        print(f"Line {line_no}: Failed to process {input_path}: {error}")
+                    
+                    completed += 1
+                    if completed % max(1, len(tasks) // 10) == 0:
+                        print(f"Processed {completed}/{len(tasks)} files...")
+                        
+                except Exception as e:
+                    print(f"Worker error: {e}")
+                    fail_count += 1
+    else:
+        # Serial processing
+        print(f"Processing {len(tasks)} audio files serially...")
+        for line_no, input_path, output_path, sim_params in tasks:
+            simulator_instance = TelephoneChannelSimulator(**sim_params)
+            success, error = process_audio_file(input_path, output_path, simulator_instance)
+            results[line_no] = (input_path, output_path, success, error)
+            
+            if success:
+                success_count += 1
+            else:
+                fail_count += 1
+                print(f"Line {line_no}: Failed to process {input_path}: {error}")
+            
+            if (success_count + fail_count) % 100 == 0:
+                print(f"Processed {success_count + fail_count} files...")
+    
+    # Write output JSONL with updated paths
+    with open(output_jsonl, 'w', encoding='utf-8') as fout:
+        for line_no, data in jsonl_data:
+            if line_no in results:
+                input_path, output_path, success, error = results[line_no]
                 if success:
                     # Update data with new audio path
                     data[audio_key] = output_path
                     fout.write(json.dumps(data, ensure_ascii=False) + '\n')
-                    success_count += 1
-                    
-                    if success_count % 100 == 0:
-                        print(f"Processed {success_count} files...")
-                else:
-                    print(f"Line {line_no}: Failed to process {input_path}: {error}")
-                    fail_count += 1
-                    
-            except json.JSONDecodeError as e:
-                print(f"Line {line_no}: JSON decode error: {e}")
-                fail_count += 1
-            except Exception as e:
-                print(f"Line {line_no}: Unexpected error: {e}")
-                fail_count += 1
     
     print(f"\nProcessing complete:")
     print(f"  Success: {success_count}")
@@ -366,6 +440,10 @@ def main():
     parser.add_argument('--no_codec', action='store_true',
                         help='Disable codec compression')
     
+    # Parallel processing
+    parser.add_argument('--num_workers', type=int, default=64,
+                        help='Number of parallel workers for JSONL processing (default: 64, set to 1 for serial)')
+    
     args = parser.parse_args()
     
     # Initialize simulator
@@ -403,6 +481,7 @@ def main():
             args.output_audio_dir,
             simulator,
             audio_key=args.audio_key,
+            num_workers=args.num_workers,
         )
     else:
         # Single file mode

@@ -70,6 +70,9 @@ simulated_audio_dir="${data_dir}/audio"
 train_data="${data_dir}/train_telecall_16k.jsonl"
 val_data="${data_dir}/val_telecall_16k.jsonl"
 
+# Parallel processing configuration
+num_workers=64  # Number of workers for data simulation (default: 64, set to 1 for serial)
+
 # ==============================================================================
 # Model and Training Configuration
 # ==============================================================================
@@ -134,6 +137,7 @@ if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
   echo "  Input: 16kHz high-quality audio"
   echo "  Process: Apply 8kHz telephone channel effects"
   echo "  Output: 16kHz audio with telephone characteristics"
+  echo "  Parallel workers: ${num_workers}"
   python ${workspace}/data/data_simulation.py \
     --input "${source_train_data}" \
     --output "${train_data}" \
@@ -146,7 +150,8 @@ if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
     --codec_type "mu-law" \
     --snr_db_min 15 \
     --snr_db_max 25 \
-    --power_line_freq 50
+    --power_line_freq 50 \
+    --num_workers ${num_workers}
 
   # Check if source validation data exists
   if [ -f "${source_val_data}" ]; then
@@ -163,7 +168,8 @@ if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
       --codec_type "mu-law" \
       --snr_db_min 15 \
       --snr_db_max 25 \
-      --power_line_freq 50
+      --power_line_freq 50 \
+      --num_workers ${num_workers}
   else
     echo "WARNING: Source validation data not found: ${source_val_data}"
     echo "Using training data for validation (not recommended)"
