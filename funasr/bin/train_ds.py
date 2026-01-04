@@ -52,6 +52,34 @@ def main_hydra(kwargs: DictConfig):
     if "model_conf" not in kwargs:
         logging.info("download models from model hub: {}".format(kwargs.get("hub", "ms")))
         kwargs = download_model(is_training=kwargs.get("is_training", True), **kwargs)
+    else:
+        # Handle relative paths in llm_conf and tokenizer_conf when loading from local config
+        pretrained_model = kwargs.get("pretrained_model", None)
+        if pretrained_model is None:
+            # Try to infer from modelscope cache
+            modelscope_cache = os.environ.get("MODELSCOPE_CACHE", os.path.expanduser("~/.cache/modelscope"))
+            pretrained_model_path = os.path.join(modelscope_cache, "models", "FunAudioLLM", "Fun-ASR-Nano-2512")
+            if os.path.exists(pretrained_model_path):
+                pretrained_model = pretrained_model_path
+        
+        if pretrained_model and os.path.exists(pretrained_model):
+            logging.info(f"Using pretrained model path: {pretrained_model}")
+            # Resolve relative paths in llm_conf
+            if "llm_conf" in kwargs and "init_param_path" in kwargs["llm_conf"]:
+                llm_init_path = kwargs["llm_conf"]["init_param_path"]
+                if llm_init_path and not os.path.isabs(llm_init_path):
+                    abs_llm_path = os.path.join(pretrained_model, llm_init_path)
+                    if os.path.exists(abs_llm_path):
+                        kwargs["llm_conf"]["init_param_path"] = abs_llm_path
+                        logging.info(f"Resolved llm init_param_path to: {abs_llm_path}")
+            # Resolve relative paths in tokenizer_conf
+            if "tokenizer_conf" in kwargs and "init_param_path" in kwargs["tokenizer_conf"]:
+                tokenizer_init_path = kwargs["tokenizer_conf"]["init_param_path"]
+                if tokenizer_init_path and not os.path.isabs(tokenizer_init_path):
+                    abs_tokenizer_path = os.path.join(pretrained_model, tokenizer_init_path)
+                    if os.path.exists(abs_tokenizer_path):
+                        kwargs["tokenizer_conf"]["init_param_path"] = abs_tokenizer_path
+                        logging.info(f"Resolved tokenizer init_param_path to: {abs_tokenizer_path}")
 
     main(**kwargs)
 

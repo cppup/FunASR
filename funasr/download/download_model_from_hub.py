@@ -78,6 +78,19 @@ def download_from_ms(**kwargs):
             kwargs["frontend_conf"]["cmvn_file"] = os.path.join(model_or_path, "am.mvn")
         if os.path.exists(os.path.join(model_or_path, "jieba_usr_dict")):
             kwargs["jieba_usr_dict"] = os.path.join(model_or_path, "jieba_usr_dict")
+        # Handle relative paths in llm_conf and tokenizer_conf
+        if "llm_conf" in kwargs and "init_param_path" in kwargs["llm_conf"]:
+            llm_init_path = kwargs["llm_conf"]["init_param_path"]
+            if llm_init_path and not os.path.isabs(llm_init_path):
+                abs_llm_path = os.path.join(model_or_path, llm_init_path)
+                if os.path.exists(abs_llm_path):
+                    kwargs["llm_conf"]["init_param_path"] = abs_llm_path
+        if "tokenizer_conf" in kwargs and "init_param_path" in kwargs["tokenizer_conf"]:
+            tokenizer_init_path = kwargs["tokenizer_conf"]["init_param_path"]
+            if tokenizer_init_path and not os.path.isabs(tokenizer_init_path):
+                abs_tokenizer_path = os.path.join(model_or_path, tokenizer_init_path)
+                if os.path.exists(abs_tokenizer_path):
+                    kwargs["tokenizer_conf"]["init_param_path"] = abs_tokenizer_path
     if isinstance(kwargs, DictConfig):
         kwargs = OmegaConf.to_container(kwargs, resolve=True)
     logging.warning(f'trust_remote_code: {kwargs.get("trust_remote_code", False)}')
@@ -150,6 +163,19 @@ def download_from_hf(**kwargs):
             kwargs["frontend_conf"]["cmvn_file"] = os.path.join(model_or_path, "am.mvn")
         if os.path.exists(os.path.join(model_or_path, "jieba_usr_dict")):
             kwargs["jieba_usr_dict"] = os.path.join(model_or_path, "jieba_usr_dict")
+        # Handle relative paths in llm_conf and tokenizer_conf
+        if "llm_conf" in kwargs and "init_param_path" in kwargs["llm_conf"]:
+            llm_init_path = kwargs["llm_conf"]["init_param_path"]
+            if llm_init_path and not os.path.isabs(llm_init_path):
+                abs_llm_path = os.path.join(model_or_path, llm_init_path)
+                if os.path.exists(abs_llm_path):
+                    kwargs["llm_conf"]["init_param_path"] = abs_llm_path
+        if "tokenizer_conf" in kwargs and "init_param_path" in kwargs["tokenizer_conf"]:
+            tokenizer_init_path = kwargs["tokenizer_conf"]["init_param_path"]
+            if tokenizer_init_path and not os.path.isabs(tokenizer_init_path):
+                abs_tokenizer_path = os.path.join(model_or_path, tokenizer_init_path)
+                if os.path.exists(abs_tokenizer_path):
+                    kwargs["tokenizer_conf"]["init_param_path"] = abs_tokenizer_path
     if isinstance(kwargs, DictConfig):
         kwargs = OmegaConf.to_container(kwargs, resolve=True)
     logging.warning(f'trust_remote_code: {kwargs.get("trust_remote_code", False)}')
