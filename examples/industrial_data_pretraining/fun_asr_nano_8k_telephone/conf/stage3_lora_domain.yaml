@@ -1,0 +1,154 @@
+# Copyright FunASR (https://github.com/alibaba-damo-academy/FunASR). All Rights Reserved.
+#  MIT License  (https://opensource.org/licenses/MIT)
+
+# Stage 3: LLM LoRA Fine-tuning for Domain Adaptation
+# Goal: Inject business terminology and telephony speech patterns
+# Data: 50h real telephone outbound call data
+# Strategy: LoRA on LLM, freeze everything else
+
+# Network architecture
+model: FunASRNano
+model_conf:
+    lsm_weight: 0.1
+    length_normalized_loss: true
+
+# Audio Encoder - FROZEN
+audio_encoder: SenseVoiceEncoderSmall
+audio_encoder_conf:
+    output_size: 512
+    attention_heads: 4
+    linear_units: 2048
+    num_blocks: 50
+    tp_blocks: 20
+    freeze: true  # STAGE 3: 完全冻结
+
+# LLM - LoRA Fine-tuning
+llm: Qwen3-0.6b
+llm_conf:
+    hub: hf
+    freeze: true  # Base model frozen
+    llm_dtype: bf16
+    init_param_path: Qwen3-0.6B
+    use_lora: true  # STAGE 3: 使用 LoRA
+    lora_conf:
+        freeze_lora: false
+        task_type: CAUSAL_LM
+        r: 16  # LoRA rank
+        lora_alpha: 32
+        lora_dropout: 0.05
+        target_modules:
+            - q_proj
+            - v_proj
+            - k_proj
+            - o_proj
+
+# Audio Adaptor - FROZEN
+audio_adaptor: Transformer
+audio_adaptor_conf:
+    downsample_rate: 1
+    use_low_frame_rate: true
+    ffn_dim: 2048
+    llm_dim: 1024
+    encoder_dim: 512
+    n_layer: 2
+    freeze: true  # STAGE 3: 冻结
+
+# CTC Decoder - FROZEN
+ctc_decoder: Transformer
+ctc_decoder_conf:
+    downsample_rate: 1
+    ffn_dim: 2048
+    llm_dim: 512
+    encoder_dim: 512
+    n_layer: 5
+    freeze: true  # STAGE 3: 冻结
+
+# Frontend - 16kHz
+frontend: WavFrontend
+frontend_conf:
+    fs: 16000
+    window: hamming
+    n_mels: 80
+    frame_length: 25
+    frame_shift: 10
+    lfr_m: 7
+    lfr_n: 6
+
+# SpecAugment - Light augmentation for real data
+specaug: SpecAugLFR
+specaug_conf:
+    apply_time_warp: false
+    apply_freq_mask: true
+    freq_mask_width_range:
+        - 0
+        - 8  # 减小augmentation（真实数据已有噪声）
+    lfr_rate: 6
+    num_freq_mask: 1
+    apply_time_mask: true
+    time_mask_width_range:
+        - 0
+        - 30  # 适度time_mask
+    num_time_mask: 1
+
+# Training Configuration
+train_conf:
+    use_lora: ${llm_conf.use_lora}
+    accum_grad: 2  # 增大accumulation（小数据集）
+    grad_clip: 5
+    max_epoch: 20  # 更多epochs（小数据集）
+    keep_nbest_models: 10
+    log_interval: 5
+    validate_interval: 200
+    save_checkpoint_interval: 200
+    avg_nbest_model: 5
+    use_bf16: false
+    use_deepspeed: false
+
+# Optimizer - Low learning rate
+optim: adamw
+optim_conf:
+    lr: 0.00001  # 1e-5, Stage 3使用小学习率
+    weight_decay: 0.01
+
+# Learning Rate Scheduler
+scheduler: warmuplr
+scheduler_conf:
+    warmup_steps: 100
+
+# Dataset Configuration
+dataset: FunASR
+dataset_conf:
+    index_ds: FunASR
+    batch_sampler: BatchSampler
+    batch_type: token
+    batch_size: 4096  # 减小batch_size（小数据集）
+    max_token_length: 3500
+    shuffle: true
+    sort_size: 512
+    num_workers: 4
+    audio_adaptor_downsample_rate: ${audio_adaptor_conf.downsample_rate}
+    audio_encoder_downsample_rate: 2
+    retry: 20
+    
+    # Prompt configuration for business scenarios
+    prompt_classes: MultiContextPrompt
+    prompt_conf:
+        use_hotwords: true
+        use_asr_hotwords: true
+        max_neg_hotwords_num: 0
+        min_neg_hotwords_num: 0
+        use_hist: false
+
+# Tokenizer
+tokenizer: HuggingfaceTokenizer
+tokenizer_conf:
+    unk_symbol: <unk>
+    init_param_path: Qwen3-0.6B
+
+# Notes for Stage 3:
+# 1. 加载Stage 2的checkpoint，只激活LoRA层
+# 2. 使用50h真实电话外呼数据，包含业务术语和场景prompt
+# 3. 小学习率（1e-5）防止过拟合，保护前两阶段学到的知识
+# 4. 增大gradient accumulation和epoch数，充分利用小数据集
+# 5. 启用hotwords支持，提升关键业务词识别率
+# 6. 完成后应在业务场景有明显提升，尤其是关键词准确率

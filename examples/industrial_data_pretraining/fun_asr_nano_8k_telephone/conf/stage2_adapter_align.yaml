@@ -1,0 +1,131 @@
+# Copyright FunASR (https://github.com/alibaba-damo-academy/FunASR). All Rights Reserved.
+#  MIT License  (https://opensource.org/licenses/MIT)
+
+# Stage 2: Adapter & CTC Decoder Fine-tuning
+# Goal: Realign 8kHz audio features to LLM token space
+# Data: 1000h+ simulated telephone audio
+# Strategy: Train Adapter + CTC Decoder, freeze Encoder & LLM
+
+# Network architecture
+model: FunASRNano
+model_conf:
+    lsm_weight: 0.1
+    length_normalized_loss: true
+
+# Audio Encoder - FROZEN (using Stage 1 adapted weights)
+audio_encoder: SenseVoiceEncoderSmall
+audio_encoder_conf:
+    output_size: 512
+    attention_heads: 4
+    linear_units: 2048
+    num_blocks: 50
+    tp_blocks: 20
+    freeze: true  # STAGE 2: 冻结 Encoder
+
+# LLM - FROZEN
+llm: Qwen3-0.6b
+llm_conf:
+    hub: hf
+    freeze: true  # STAGE 2: 完全冻结
+    llm_dtype: bf16
+    init_param_path: Qwen3-0.6B
+
+# Audio Adaptor - TRAINABLE
+audio_adaptor: Transformer
+audio_adaptor_conf:
+    downsample_rate: 1
+    use_low_frame_rate: true
+    ffn_dim: 2048
+    llm_dim: 1024
+    encoder_dim: 512
+    n_layer: 2
+    freeze: false  # STAGE 2: 微调 Adaptor
+
+# CTC Decoder - TRAINABLE
+ctc_decoder: Transformer
+ctc_decoder_conf:
+    downsample_rate: 1
+    ffn_dim: 2048
+    llm_dim: 512
+    encoder_dim: 512
+    n_layer: 5
+    freeze: false  # STAGE 2: 微调 CTC Decoder
+
+# Frontend - 16kHz
+frontend: WavFrontend
+frontend_conf:
+    fs: 16000
+    window: hamming
+    n_mels: 80
+    frame_length: 25
+    frame_shift: 10
+    lfr_m: 7
+    lfr_n: 6
+
+# SpecAugment - Enhanced for VoIP
+specaug: SpecAugLFR
+specaug_conf:
+    apply_time_warp: false
+    apply_freq_mask: true
+    freq_mask_width_range:
+        - 0
+        - 10
+    lfr_rate: 6
+    num_freq_mask: 1
+    apply_time_mask: true
+    time_mask_width_range:
+        - 0
+        - 50  # 保持大time_mask
+    num_time_mask: 2
+
+# Training Configuration
+train_conf:
+    accum_grad: 1
+    grad_clip: 5
+    max_epoch: 10
+    keep_nbest_models: 5
+    log_interval: 10
+    validate_interval: 1000
+    save_checkpoint_interval: 1000
+    avg_nbest_model: 3
+    use_bf16: false
+    use_deepspeed: false
+
+# Optimizer - Medium learning rate
+optim: adamw
+optim_conf:
+    lr: 0.00005  # 5e-5, Stage 2使用中等学习率
+    weight_decay: 0.01
+
+# Learning Rate Scheduler
+scheduler: warmuplr
+scheduler_conf:
+    warmup_steps: 500
+
+# Dataset Configuration
+dataset: FunASR
+dataset_conf:
+    index_ds: FunASR
+    batch_sampler: BatchSampler
+    batch_type: token
+    batch_size: 6000
+    max_token_length: 3500
+    shuffle: true
+    sort_size: 1024
+    num_workers: 8
+    audio_adaptor_downsample_rate: ${audio_adaptor_conf.downsample_rate}
+    audio_encoder_downsample_rate: 2
+    retry: 20
+
+# Tokenizer
+tokenizer: HuggingfaceTokenizer
+tokenizer_conf:
+    unk_symbol: <unk>
+    init_param_path: Qwen3-0.6B
+
+# Notes for Stage 2:
+# 1. 加载Stage 1的checkpoint，冻结Encoder
+# 2. 微调Adaptor和CTC Decoder，重新对齐8kHz特征到Token空间
+# 3. 使用相同的模拟数据，确保对齐层稳固
+# 4. 中等学习率（5e-5）避免破坏Encoder学到的特征
+# 5. 完成后CTC loss应显著下降，识别准确率提升

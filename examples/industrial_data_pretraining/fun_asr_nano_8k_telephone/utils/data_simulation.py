@@ -159,6 +159,73 @@ class TelephoneChannelSimulator:
         
         return decompressed
     
+    def simulate_voip_packet_loss(self, audio, fs, loss_rate=0.05, burst_length=3):
+        """
+        Simulate VoIP packet loss (frame dropping).
+        
+        Args:
+            audio: Input audio signal
+            fs: Sampling rate
+            loss_rate: Packet loss rate (default: 0.05 = 5%)
+            burst_length: Burst loss length in frames (default: 3)
+        
+        Returns:
+            Audio with simulated packet loss
+        """
+        frame_length = int(fs * 0.02)  # 20ms frame
+        num_frames = len(audio) // frame_length
+        
+        output = audio.copy()
+        i = 0
+        while i < num_frames:
+            if np.random.rand() < loss_rate:
+                # Burst loss
+                loss_frames = np.random.randint(1, burst_length + 1)
+                start = i * frame_length
+                end = min((i + loss_frames) * frame_length, len(audio))
+                
+                # Fill with very weak white noise (simulating PLC)
+                output[start:end] = np.random.randn(end - start) * 0.01
+                i += loss_frames
+            else:
+                i += 1
+        
+        return output
+    
+    def add_babble_noise(self, audio, fs, babble_audio=None, snr_db=10):
+        """
+        Add babble noise (background speech) to simulate office/call center environment.
+        
+        Args:
+            audio: Input audio signal
+            fs: Sampling rate
+            babble_audio: Background speech audio (if None, generate from random segments)
+            snr_db: Signal-to-Babble ratio in dB
+        
+        Returns:
+            Audio with babble noise
+        """
+        # Calculate signal power
+        signal_power = np.mean(audio ** 2)
+        
+        # Generate or use babble noise
+        if babble_audio is None or len(babble_audio) < len(audio):
+            # Generate babble from multiple random noise sources
+            babble = np.random.randn(len(audio)) * 0.3
+        else:
+            # Randomly select segment from babble audio
+            if len(babble_audio) > len(audio):
+                start_idx = np.random.randint(0, len(babble_audio) - len(audio))
+                babble = babble_audio[start_idx:start_idx + len(audio)]
+            else:
+                babble = babble_audio
+        
+        # Calculate babble power for target SNR
+        babble_power = signal_power / (10 ** (snr_db / 10))
+        babble_scaled = babble * np.sqrt(babble_power / (np.mean(babble ** 2) + 1e-10))
+        
+        return audio + babble_scaled
+    
     def add_telephone_noise(self, audio, fs):
         """
         Add telephone line noise (white noise + power line interference).
@@ -194,13 +261,15 @@ class TelephoneChannelSimulator:
         
         return noisy_audio
     
-    def simulate(self, audio, orig_fs):
+    def simulate(self, audio, orig_fs, add_packet_loss=True, add_babble=True):
         """
-        Apply complete telephone channel simulation.
+        Apply complete telephone channel simulation with VoIP effects.
         
         Args:
             audio: Input audio signal
             orig_fs: Original sampling rate
+            add_packet_loss: Whether to simulate VoIP packet loss
+            add_babble: Whether to add babble noise
         
         Returns:
             Simulated telephone channel audio at output sampling rate (16kHz)
@@ -223,16 +292,26 @@ class TelephoneChannelSimulator:
             elif self.codec_type == "a-law":
                 audio = self.g711_a_law_compress(audio)
         
-        # Step 5: Add telephone line noise (optional)
+        # Step 5: VoIP packet loss simulation (NEW)
+        if add_packet_loss and np.random.rand() < 0.5:  # 50% chance to add packet loss
+            loss_rate = np.random.uniform(0.01, 0.05)  # 1%-5% loss rate
+            audio = self.simulate_voip_packet_loss(audio, self.target_fs, loss_rate=loss_rate)
+        
+        # Step 6: Add babble noise (background speech) (NEW)
+        if add_babble and np.random.rand() < 0.3:  # 30% chance to add babble
+            babble_snr = np.random.uniform(5, 15)  # 5-15dB SNR
+            audio = self.add_babble_noise(audio, self.target_fs, snr_db=babble_snr)
+        
+        # Step 7: Add telephone line noise (optional)
         if self.add_noise:
             audio = self.add_telephone_noise(audio, self.target_fs)
         
-        # Step 6: Final normalization
+        # Step 8: Final normalization
         max_val = np.max(np.abs(audio))
         if max_val > 0:
             audio = audio / max_val * 0.95
         
-        # Step 7: Upsample to output_fs (16kHz) to preserve telephone characteristics
+        # Step 9: Upsample to output_fs (16kHz) to preserve telephone characteristics
         # while being compatible with WavFrontend
         if self.output_fs != self.target_fs:
             audio = self.resample_audio(audio, self.target_fs, target_fs=self.output_fs)

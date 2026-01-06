@@ -1,0 +1,292 @@
+# Copyright FunASR (https://github.com/alibaba-damo-academy/FunASR). All Rights Reserved.
+#  MIT License  (https://opensource.org/licenses/MIT)
+
+# ==============================================================================
+# STAGE 1: AUDIO ENCODER FULL FINE-TUNING FOR 8kHz ADAPTATION
+# ==============================================================================
+# Baseline: /gpfs01/nfs_share/finrc/liangguang/cache/modelscope/models/FunAudioLLM/Fun-ASR-Nano-2512/config.yaml
+#
+# Goal: Adapt encoder to 8kHz frequency spectrum (high-frequency missing)
+# Data: 1000h+ simulated telephone audio
+# Strategy: Full fine-tuning of Audio Encoder, all other components frozen
+#
+# Modification Legend:
+#   [ALIGNED]   - Same as pretrained model (no changes)
+#   [MODIFIED]  - Changed from pretrained model for Stage 1
+#   [NEW]       - Not in pretrained model (added for Stage 1)
+#
+# NOTE: freeze_layer_num is NOT supported in FunASRNano model.py!
+#       Must use freeze: false for full encoder training
+# ==============================================================================
+
+# ============================================================================
+# MODEL ARCHITECTURE
+# ============================================================================
+
+model: FunASRNano  # [ALIGNED]
+model_conf:  # [ALIGNED]
+    lsm_weight: 0.1  # [ALIGNED]
+    length_normalized_loss: true  # [ALIGNED]
+
+# ============================================================================
+# AUDIO ENCODER CONFIGURATION - FULL FINE-TUNING
+# ============================================================================
+
+audio_encoder: SenseVoiceEncoderSmall  # [ALIGNED]
+audio_encoder_conf:  # [ALIGNED] with freeze modification
+    output_size: 512  # [ALIGNED]
+    attention_heads: 4  # [ALIGNED]
+    linear_units: 2048  # [ALIGNED]
+    num_blocks: 50  # [ALIGNED]
+    tp_blocks: 20  # [ALIGNED]
+    dropout_rate: 0.1  # [ALIGNED]
+    positional_dropout_rate: 0.1  # [ALIGNED]
+    attention_dropout_rate: 0.1  # [ALIGNED]
+    input_layer: pe  # [ALIGNED]
+    pos_enc_class: SinusoidalPositionEncoder  # [ALIGNED]
+    normalize_before: true  # [ALIGNED]
+    kernel_size: 11  # [ALIGNED]
+    sanm_shfit: 0  # [ALIGNED]
+    selfattention_layer_type: sanm  # [ALIGNED]
+    feat_permute: true  # [ALIGNED]
+    freeze: false  # [ALIGNED] Full encoder fine-tuning for 8kHz adaptation
+    freeze_layer_num: -1  # [ALIGNED]
+
+# ============================================================================
+# LLM CONFIGURATION - FROZEN
+# ============================================================================
+
+llm: Qwen3-0.6b  # [ALIGNED]
+llm_conf:  # [ALIGNED] LLM completely frozen in Stage 1
+    hub: hf  # [ALIGNED]
+    freeze: true  # [ALIGNED]
+    llm_dtype: bf16  # [ALIGNED]
+    init_param_path: Qwen3-0.6B  # [ALIGNED]
+    use_lora: false  # [ALIGNED]
+    lora_conf:  # [ALIGNED]
+        freeze_lora: true  # [ALIGNED]
+        task_type: CAUSAL_LM  # [ALIGNED]
+        r: 16  # [ALIGNED]
+        lora_alpha: 32  # [ALIGNED]
+        lora_dropout: 0.05  # [ALIGNED]
+        bias: none  # [ALIGNED]
+        target_modules:  # [ALIGNED]
+            - q_proj
+            - v_proj
+        init_param_path: ""  # [ALIGNED]
+
+# ============================================================================
+# AUDIO ADAPTOR CONFIGURATION - FROZEN
+# ============================================================================
+
+audio_adaptor: Transformer  # [ALIGNED]
+audio_adaptor_conf:  # [ALIGNED] Adaptor frozen in Stage 1
+    downsample_rate: 1  # [ALIGNED]
+    use_low_frame_rate: true  # [ALIGNED]
+    ffn_dim: 2048  # [ALIGNED]
+    llm_dim: 1024  # [ALIGNED]
+    encoder_dim: 512  # [ALIGNED]
+    n_layer: 2  # [ALIGNED]
+    freeze: true  # [ALIGNED] Do not train adaptor in Stage 1
+
+# ============================================================================
+# CTC DECODER CONFIGURATION - FROZEN
+# ============================================================================
+
+ctc_decoder: Transformer  # [ALIGNED]
+detach_ctc_decoder: true  # [ALIGNED]
+ctc_decoder_conf:  # [ALIGNED] CTC decoder frozen in Stage 1
+    downsample_rate: 1  # [ALIGNED]
+    ffn_dim: 2048  # [ALIGNED]
+    llm_dim: 512  # [ALIGNED]
+    encoder_dim: 512  # [ALIGNED]
+    n_layer: 5  # [ALIGNED]
+    freeze: true  # [ALIGNED] Do not train CTC in Stage 1 (focus on encoder)
+ctc_weight: 1.0  # [ALIGNED]
+ctc_conf:  # [ALIGNED]
+    dropout_rate: 0.0  # [ALIGNED]
+    ctc_type: builtin  # [ALIGNED]
+    reduce: true  # [ALIGNED]
+    ignore_nan_grad: true  # [ALIGNED]
+
+# ============================================================================
+# FRONTEND CONFIGURATION
+# ============================================================================
+
+frontend: WavFrontend  # [ALIGNED]
+frontend_conf:  # [MODIFIED] Native 8kHz processing for Stage 1
+    fs: 16000  # [ALIGNED] Pretrained=16000, use native 8kHz to let encoder learn frequency spectrum
+    window: hamming  # [ALIGNED]
+    n_mels: 80  # [ALIGNED]
+    frame_length: 25  # [ALIGNED]
+    frame_shift: 10  # [ALIGNED]
+    lfr_m: 7  # [ALIGNED]
+    lfr_n: 6  # [ALIGNED]
+    cmvn_file: null  # [ALIGNED]
+
+# ============================================================================
+# SPECAUGMENT CONFIGURATION - ENHANCED FOR VOIP SIMULATION
+# ============================================================================
+
+# specaug: SpecAugLFR  # [NEW] Data augmentation for fine-tuning
+# specaug_conf:  # [NEW] Enhanced SpecAug for Stage 1
+#     apply_time_warp: false  # [ALIGNED] No time warping
+#     time_warp_window: 5  # [ALIGNED] (not used)
+#     time_warp_mode: bicubic  # [ALIGNED] (not used)
+#     apply_freq_mask: true  # [ALIGNED] Enable frequency masking
+#     freq_mask_width_range:  # [ALIGNED] Reduced for narrow 8kHz spectrum
+#         - 0
+#         - 10  # Stage 1: smaller range for 8kHz
+#     lfr_rate: 6  # [ALIGNED]
+#     num_freq_mask: 1  # [ALIGNED]
+#     apply_time_mask: true  # [ALIGNED] Enable time masking
+#     time_mask_width_range:  # [MODIFIED] Larger for VoIP packet loss simulation
+#         - 0
+#         - 10  # [ALIGNED] Stage 1: larger time mask to simulate VoIP packet loss
+#     num_time_mask: 1  # [ALIGNED] More time masks in Stage 1
+
+# ============================================================================
+# TRAINING CONFIGURATION - STAGE 1 SPECIFIC
+# ============================================================================
+
+train_conf:  # [MODIFIED] Stage 1 specific training parameters
+    use_lora: ${llm_conf.use_lora}  # [ALIGNED]
+    accum_grad: 1  # [ALIGNED]
+    grad_clip: 5  # [ALIGNED]
+    max_epoch: 10  # [MODIFIED] Pretrained=2, increased for encoder adaptation
+    keep_nbest_models: 5  # [MODIFIED] Pretrained=200, reduced for Stage 1
+    log_interval: 10  # [MODIFIED] Pretrained=100, more frequent logging
+    effective_save_name_excludes:  # [ALIGNED]
+        - llm.  # [ALIGNED]
+    resume: true  # [ALIGNED]
+    validate_interval: 1000  # [MODIFIED] Pretrained=2000, more frequent validation for Stage 1
+    save_checkpoint_interval: 1000  # [MODIFIED] Pretrained=2000, save checkpoints more frequently
+    avg_nbest_model: 3  # [MODIFIED] Average 3 best models for Stage 1
+    use_bf16: false  # [ALIGNED]
+    use_deepspeed: false  # [ALIGNED] Single GPU fine-tuning
+    deepspeed_config: null  # [ALIGNED]
+    save_init_model: false  # [ALIGNED]
+
+# ============================================================================
+# OPTIMIZER CONFIGURATION - STAGE 1 SPECIFIC
+# ============================================================================
+
+optim: adamw  # [ALIGNED]
+optim_conf:  # [MODIFIED] Higher learning rate for encoder-only training
+    lr: 1.0e-04  # [MODIFIED] Pretrained=5e-6, increased 20x for encoder-only Stage 1
+    weight_decay: 0.01  # [ALIGNED] L2 regularization
+
+# ============================================================================
+# LEARNING RATE SCHEDULER CONFIGURATION
+# ============================================================================
+
+scheduler: warmuplr  # [ALIGNED]
+scheduler_conf:  # [ALIGNED]
+    warmup_steps: 1000  # [ALIGNED]
+
+# ============================================================================
+# DATASET CONFIGURATION - STAGE 1 SPECIFIC
+# ============================================================================
+
+dataset: FunASR  # [ALIGNED]
+dataset_conf:  # [MODIFIED] Stage 1 specific dataset settings
+    index_ds: FunASR  # [ALIGNED]
+    batch_sampler: BatchSampler  # [ALIGNED]
+    batch_type: token  # [ALIGNED]
+    batch_size: 6000  # [ALIGNED]
+    max_token_length: 3500  # [ALIGNED] Full sequence length for Stage 1
+    shuffle: true  # [ALIGNED]
+    sort_size: 1024  # [ALIGNED]
+    batch_size_scale_ratio_max: 2  # [ALIGNED]
+    num_workers: 16  # [MODIFIED] Pretrained=4, more workers for 8kHz data loading
+    audio_adaptor_downsample_rate: ${audio_adaptor_conf.downsample_rate}  # [ALIGNED]
+    audio_encoder_downsample_rate: 2  # [ALIGNED]
+    data_split_num: 256  # [ALIGNED]
+    batch_size_sample_max: 10  # [ALIGNED]
+    retry: 2  # [MODIFIED]
+    batch_size_token_max: 6000  # [ALIGNED]
+    max_source_length: 12000  # [ALIGNED]
+    max_target_length: 2048  # [ALIGNED]
+    prompt_classes: MultiContextPrompt  # [ALIGNED]
+    prompt_conf:  # [ALIGNED]
+        max_neg_hotwords_num: 0  # [ALIGNED]
+        min_neg_hotwords_num: 0  # [ALIGNED]
+        use_hist: false  # [ALIGNED]
+        use_one_pass_result: true  # [ALIGNED]
+        use_hotwords: true  # [ALIGNED]
+        use_asr_hotwords: true  # [ALIGNED]
+        chinese_hotwords_list: null  # [ALIGNED]
+        english_hotwords_list: null  # [ALIGNED]
+    ctc_tokenizer: SenseVoiceTokenizer  # [ALIGNED]
+    ctc_target_normalize: true  # [ALIGNED]
+    ctc_tokenizer_conf:  # [ALIGNED]
+        vocab_path: null  # [ALIGNED]
+        is_multilingual: true  # [ALIGNED]
+        num_languages: 8749  # [ALIGNED]
+    min_source_length: 10  # [ALIGNED]
+    batch_size_scale_threshold: 3000  # [ALIGNED]
+    use_dynamic_output_ratio: 0.0  # [ALIGNED]
+
+# ============================================================================
+# TOKENIZER CONFIGURATION
+# ============================================================================
+
+tokenizer: HuggingfaceTokenizer  # [ALIGNED]
+tokenizer_conf:  # [ALIGNED]
+    init_param_path: ${llm_conf.init_param_path}  # [ALIGNED]
+    # unk_symbol: <unk>  # [NEW]
+
+# ============================================================================
+# GLOBAL SETTINGS
+# ============================================================================
+
+enable_tf32: true  # [ALIGNED]
+debug: false  # [ALIGNED]
+train_data_set_list: null  # [ALIGNED]
+valid_data_set_list: null  # [ALIGNED]
+init_param: null  # [ALIGNED]
+output_dir: null  # [ALIGNED]
+
+# ============================================================================
+# STAGE 1 TRAINING SUMMARY
+# ============================================================================
+#
+# OBJECTIVE:
+#   Adapt encoder to 8kHz frequency spectrum through full fine-tuning
+#
+# TRAINABLE COMPONENTS:
+#   ✓ Audio Encoder (freeze=false) - ~150M parameters
+#
+# FROZEN COMPONENTS:
+#   ✗ LLM (freeze=true)
+#   ✗ Audio Adaptor (freeze=true)
+#   ✗ CTC Decoder (freeze=true)
+#
+# KEY STAGE 1 MODIFICATIONS:
+#   1. frontend_conf.fs: 16000 → 8000
+#      Use native 8kHz processing to let encoder learn frequency characteristics
+#
+#   2. optim_conf.lr: 5e-6 → 1e-4 (20x increase)
+#      Encoder-only training allows higher learning rate
+#
+#   3. specaug_conf.time_mask_width_range: [0, 10] → [0, 50]
+#      Larger time masking simulates VoIP packet loss and frame drops
+#
+#   4. specaug_conf.num_time_mask: 1 → 2
+#      More aggressive time masking for telephony robustness
+#
+#   5. train_conf.validate_interval: 2000 → 1000
+#      More frequent validation to monitor encoder adaptation
+#
+#   6. dataset_conf.num_workers: 4 → 8
+#      More workers for efficient 8kHz data loading
+#
+# EXPECTED RESULTS:
+#   • Loss should decrease 30%+ compared to baseline
+#   • Model becomes sensitive to 8kHz frequency spectrum
+#   • Improved performance on 8kHz telephone audio
+#
+# NEXT STEP:
+#   After Stage 1, proceed to train CTC Decoder (main config) on 8kHz data
+#
+# ==============================================================================

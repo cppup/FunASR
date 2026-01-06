@@ -2,152 +2,273 @@
 #  MIT License  (https://opensource.org/licenses/MIT)
 
 # Configuration file for Fun-ASR-Nano 8kHz telephone channel fine-tuning
-# This configuration matches the Fun-ASR-Nano-2512 model architecture
-# Note: Audio is upsampled from 8kHz to 16kHz to work with WavFrontend
+# Baseline: /gpfs01/nfs_share/finrc/liangguang/cache/modelscope/models/FunAudioLLM/Fun-ASR-Nano-2512/config.yaml
+# This configuration is a fine-tuning variant with explicit parameter alignment to the pretrained model
+# 
+# Modification Legend:
+#   [ALIGNED]   - Same as pretrained model (no changes)
+#   [MODIFIED]  - Changed from pretrained model for fine-tuning
+#   [NEW]       - Not in pretrained model (added for fine-tuning)
+#   [REMOVED]   - In pretrained but explicitly removed for fine-tuning
 
-# Network architecture
-# For training from scratch or fine-tuning with custom config, uncomment model_conf:
-model: FunASRNano
-model_conf:
-    lsm_weight: 0.1  # Label smoothing
-    length_normalized_loss: true
+# ============================================================================
+# MODEL ARCHITECTURE
+# ============================================================================
 
-# For loading pretrained model from hub, use one of these:
-# model: FunAudioLLM/Fun-ASR-Nano-2512  # Download from ModelScope
-# hub: ms  # Use ModelScope hub (default)
-# or
-# model: FunAudioLLM/Fun-ASR-Nano-2512  # Download from HuggingFace
-# hub: hf  # Use HuggingFace hub
+model: FunASRNano  # [ALIGNED]
+model_conf:  # [ALIGNED]
+    lsm_weight: 0.1  # [ALIGNED] Label smoothing weight
+    length_normalized_loss: true  # [ALIGNED] Normalize loss by sequence length
 
-# Audio Encoder Configuration
-# Using SenseVoiceEncoderSmall (not Whisper)
-audio_encoder: SenseVoiceEncoderSmall
-audio_encoder_conf:
-    output_size: 512
-    attention_heads: 4
-    linear_units: 2048
-    num_blocks: 50
-    tp_blocks: 20
-    freeze: true
+# ============================================================================
+# AUDIO ENCODER CONFIGURATION
+# ============================================================================
 
-# LLM Configuration
-# Using Qwen3-0.6B (not Qwen2.5-1.5B)
-llm: Qwen3-0.6b
-llm_conf:
-    hub: hf
-    freeze: true
-    llm_dtype: bf16
-    init_param_path: Qwen3-0.6B
+audio_encoder: SenseVoiceEncoderSmall  # [ALIGNED]
+audio_encoder_conf:  # [ALIGNED] with modifications
+    output_size: 512  # [ALIGNED]
+    attention_heads: 4  # [ALIGNED]
+    linear_units: 2048  # [ALIGNED]
+    num_blocks: 50  # [ALIGNED]
+    tp_blocks: 20  # [ALIGNED]
+    dropout_rate: 0.1  # [ALIGNED]
+    positional_dropout_rate: 0.1  # [ALIGNED]
+    attention_dropout_rate: 0.1  # [ALIGNED]
+    input_layer: pe  # [ALIGNED] Positional encoding input layer
+    pos_enc_class: SinusoidalPositionEncoder  # [ALIGNED]
+    normalize_before: true  # [ALIGNED]
+    kernel_size: 11  # [ALIGNED]
+    sanm_shfit: 0  # [ALIGNED]
+    selfattention_layer_type: sanm  # [ALIGNED]
+    feat_permute: true  # [ALIGNED]
+    freeze: false  # [MODIFIED] Pretrained=true, changed to enable encoder fine-tuning for 8kHz
+    freeze_layer_num: -1  # [ALIGNED] Not supported in FunASRNano, kept for compatibility
 
-# Audio Adaptor Configuration
-# Using Transformer (not Linear)
-audio_adaptor: Transformer
-audio_adaptor_conf:
-    downsample_rate: 1
-    use_low_frame_rate: true
-    ffn_dim: 2048
-    llm_dim: 1024
-    encoder_dim: 512
-    n_layer: 2
-    freeze: true
+# ============================================================================
+# LLM CONFIGURATION
+# ============================================================================
 
-# CTC Decoder Configuration (Fun-ASR-Nano specific)
-# This is the main trainable component for 8kHz telephone fine-tuning
-ctc_decoder: Transformer
-ctc_decoder_conf:
-    downsample_rate: 1
-    ffn_dim: 2048
-    llm_dim: 512
-    encoder_dim: 512
-    n_layer: 5
-    freeze: false
-ctc_weight: 1.0
+llm: Qwen3-0.6b  # [ALIGNED]
+llm_conf:  # [ALIGNED] - LLM is frozen, only pretrained weights loaded
+    hub: hf  # [ALIGNED] HuggingFace hub
+    freeze: true  # [ALIGNED]
+    llm_dtype: bf16  # [ALIGNED] BFloat16 precision
+    init_param_path: Qwen3-0.6B  # [ALIGNED]
+    use_lora: false  # [ALIGNED] No LoRA for fine-tuning
+    lora_conf:  # [ALIGNED] LoRA disabled, kept for reference
+        freeze_lora: true  # [ALIGNED]
+        task_type: CAUSAL_LM  # [ALIGNED]
+        r: 16  # [ALIGNED]
+        lora_alpha: 32  # [ALIGNED]
+        lora_dropout: 0.05  # [ALIGNED]
+        bias: none  # [ALIGNED]
+        target_modules:  # [ALIGNED]
+            - q_proj
+            - v_proj
+        init_param_path: ""  # [ALIGNED]
 
-# Frontend Configuration
-# Using WavFrontend (not WhisperFrontend)
-# Note: WavFrontend requires 16kHz input
-frontend: WavFrontend
-frontend_conf:
-    fs: 16000  # 16kHz (telephone audio upsampled from 8kHz to 16kHz)
-    window: hamming
-    n_mels: 80
-    frame_length: 25
-    frame_shift: 10
-    lfr_m: 7
-    lfr_n: 6
+# ============================================================================
+# AUDIO ADAPTOR CONFIGURATION
+# ============================================================================
 
-# SpecAug Configuration
-specaug: SpecAugLFR
-specaug_conf:
-    apply_time_warp: false
-    time_warp_window: 5
-    time_warp_mode: bicubic
-    apply_freq_mask: true
-    freq_mask_width_range:
+audio_adaptor: Transformer  # [ALIGNED]
+audio_adaptor_conf:  # [ALIGNED] - Adaptor is frozen for this fine-tuning
+    downsample_rate: 1  # [ALIGNED]
+    use_low_frame_rate: true  # [ALIGNED]
+    ffn_dim: 2048  # [ALIGNED]
+    llm_dim: 1024  # [ALIGNED]
+    encoder_dim: 512  # [ALIGNED]
+    n_layer: 2  # [ALIGNED]
+    freeze: true  # [ALIGNED]
+
+# ============================================================================
+# CTC DECODER CONFIGURATION
+# ============================================================================
+
+ctc_decoder: Transformer  # [ALIGNED]
+detach_ctc_decoder: true  # [ALIGNED] Detach gradients from CTC decoder
+ctc_decoder_conf:  # [ALIGNED]
+    downsample_rate: 1  # [ALIGNED]
+    ffn_dim: 2048  # [ALIGNED]
+    llm_dim: 512  # [ALIGNED]
+    encoder_dim: 512  # [ALIGNED]
+    n_layer: 5  # [ALIGNED]
+    freeze: false  # [ALIGNED] CTC decoder trainable for this fine-tuning
+ctc_weight: 1.0  # [ALIGNED]
+ctc_conf:  # [ALIGNED]
+    dropout_rate: 0.0  # [ALIGNED]
+    ctc_type: builtin  # [ALIGNED]
+    reduce: true  # [ALIGNED]
+    ignore_nan_grad: true  # [ALIGNED] Ignore NaN gradients
+
+# ============================================================================
+# FRONTEND CONFIGURATION
+# ============================================================================
+
+frontend: WavFrontend  # [ALIGNED]
+frontend_conf:  # [ALIGNED]
+    fs: 16000  # [ALIGNED] 16kHz (8kHz telephone audio upsampled to 16kHz)
+    window: hamming  # [ALIGNED]
+    n_mels: 80  # [ALIGNED] Mel frequency bins
+    frame_length: 25  # [ALIGNED] Frame length in milliseconds
+    frame_shift: 10  # [ALIGNED] Frame shift in milliseconds
+    lfr_m: 7  # [ALIGNED] LFR mode
+    lfr_n: 6  # [ALIGNED] LFR factor
+    cmvn_file: null  # [ALIGNED] No CMVN normalization file
+
+# ============================================================================
+# SPECAUGMENT CONFIGURATION (SpecAugLFR)
+# ============================================================================
+
+specaug: SpecAugLFR  # [NEW] Not in pretrained model, added for fine-tuning data augmentation
+specaug_conf:  # [NEW]
+    apply_time_warp: false  # [NEW] No time warping for telephone audio
+    time_warp_window: 5  # [NEW] Time warp window size (not used)
+    time_warp_mode: bicubic  # [NEW] Interpolation mode (not used)
+    apply_freq_mask: true  # [NEW] Enable frequency masking
+    freq_mask_width_range:  # [NEW] Frequency mask width range [min, max]
         - 0
-        - 15  # Reduced from 30 for telephone audio
-    lfr_rate: 6
-    num_freq_mask: 1
-    apply_time_mask: true
-    time_mask_width_range:
+        - 15  # Reduced from pretrained default for narrow 8kHz spectrum
+    lfr_rate: 6  # [NEW] LFR rate for specaug
+    num_freq_mask: 1  # [NEW] Number of frequency masks to apply
+    apply_time_mask: true  # [NEW] Enable time masking
+    time_mask_width_range:  # [NEW] Time mask width range [min, max]
         - 0
-        - 10  # Slightly reduced for telephone scenarios
-    num_time_mask: 1
+        - 10  # [MODIFIED] Telephone audio time mask for robustness
+    num_time_mask: 1  # [NEW] Number of time masks to apply
 
-# Training Configuration
-train_conf:
-    accum_grad: 1  # Gradient accumulation steps
-    grad_clip: 5  # Gradient clipping
-    max_epoch: 20  # More epochs for fine-tuning
-    keep_nbest_models: 10
-    log_interval: 10
-    use_deepspeed: false  # Set to true when using DeepSpeed
-    deepspeed_config: null  # Path to DeepSpeed config
+# ============================================================================
+# TRAINING CONFIGURATION
+# ============================================================================
 
-# Optimizer Configuration
-# Lower learning rate to preserve pre-trained knowledge
-optim: adamw
-optim_conf:
-    lr: 0.00005  # 5e-5, lower learning rate for fine-tuning
-    weight_decay: 0.01
-    betas:
-        - 0.9
-        - 0.999
+train_conf:  # [MODIFIED] Fine-tuning specific settings
+    use_lora: ${llm_conf.use_lora}  # [ALIGNED] Reference to llm_conf.use_lora
+    accum_grad: 1  # [ALIGNED] Gradient accumulation steps
+    grad_clip: 5  # [ALIGNED] Gradient clipping value
+    max_epoch: 20  # [MODIFIED] Pretrained=2, increased for fine-tuning
+    keep_nbest_models: 10  # [MODIFIED] Pretrained=200, reduced to save disk space
+    log_interval: 10  # [MODIFIED] Pretrained=100, more frequent logging
+    effective_save_name_excludes:  # [ALIGNED]
+        - llm.  # Exclude LLM from checkpoint saves
+    resume: true  # [ALIGNED] Resume from checkpoint
+    validate_interval: 2000  # [ALIGNED] Validation interval (steps)
+    save_checkpoint_interval: 2000  # [ALIGNED] Checkpoint save interval (steps)
+    avg_nbest_model: 100  # [ALIGNED] Number of best models to average
+    use_bf16: false  # [ALIGNED] No mixed precision (use full precision)
+    use_deepspeed: false  # [MODIFIED] Pretrained=true, disabled for single GPU fine-tuning
+    deepspeed_config: null  # [ALIGNED] No DeepSpeed config for single GPU
+    save_init_model: false  # [ALIGNED] Don't save initial model
 
-# Learning Rate Scheduler
-scheduler: warmuplr
-scheduler_conf:
-    warmup_steps: 1000  # Gradual warmup
+# ============================================================================
+# OPTIMIZER CONFIGURATION
+# ============================================================================
 
-# Dataset Configuration
-# Using FunASR dataset (not AudioLLMQwenAudioDataset)
-dataset: FunASR
-dataset_conf:
-    index_ds: FunASR
-    batch_sampler: BatchSampler
-    batch_type: token
-    batch_size: 6000  # Token-based batching
-    max_token_length: 1024
-    shuffle: true
-    sort_size: 1024
-    batch_size_scale_ratio_max: 2
-    num_workers: 4
-    audio_adaptor_downsample_rate: ${audio_adaptor_conf.downsample_rate}
-    audio_encoder_downsample_rate: 2
-    data_split_num: 512
-    batch_size_sample_max: 15
-    retry: 20
+optim: adamw  # [ALIGNED]
+optim_conf:  # [MODIFIED] Fine-tuning specific optimizer settings
+    lr: 5.0e-05  # [MODIFIED] Pretrained=5e-6, increased 10x for fine-tuning
+    weight_decay: 0.01  # [MODIFIED] Pretrained=0.0, added L2 regularization to prevent overfitting
 
-# Tokenizer Configuration
-tokenizer: HuggingfaceTokenizer
-tokenizer_conf:
-    unk_symbol: <unk>
-    init_param_path: Qwen3-0.6B
+# ============================================================================
+# LEARNING RATE SCHEDULER CONFIGURATION
+# ============================================================================
 
-# Notes for 8kHz telephone fine-tuning:
-# 1. Audio is upsampled from 8kHz to 16kHz to work with WavFrontend
-# 2. Telephone channel characteristics are preserved during upsampling
-# 3. Only CTC decoder is trainable (freeze: false), other components frozen
-# 4. This approach adapts the model to 8kHz telephone domain via CTC decoder
-# 5. Data simulation: 16kHz → 8kHz (telephone effects) → 16kHz (upsample)
-# 6. Inference: 8kHz input → 16kHz (upsample) → model inference
+scheduler: warmuplr  # [ALIGNED]
+scheduler_conf:  # [MODIFIED] Fine-tuning specific scheduler
+    warmup_steps: 1000  # [MODIFIED] Pretrained=2500, reduced warmup for fine-tuning
+
+# ============================================================================
+# DATASET CONFIGURATION
+# ============================================================================
+
+dataset: FunASR  # [ALIGNED]
+dataset_conf:  # [MODIFIED] Fine-tuning specific dataset settings
+    index_ds: FunASR  # [ALIGNED]
+    batch_sampler: BatchSampler  # [ALIGNED]
+    batch_type: token  # [ALIGNED] Token-based batching
+    batch_size: 6000  # [ALIGNED] Token-based batch size
+    max_token_length: 1024  # [MODIFIED] Pretrained=3500, reduced for memory constraints
+    shuffle: true  # [ALIGNED]
+    sort_size: 1024  # [ALIGNED] Buffer size for sorting
+    batch_size_scale_ratio_max: 2  # [ALIGNED]
+    num_workers: 4  # [ALIGNED] Data loading workers
+    audio_adaptor_downsample_rate: ${audio_adaptor_conf.downsample_rate}  # [ALIGNED]
+    audio_encoder_downsample_rate: 2  # [MODIFIED] Pretrained=6, changed for 8kHz processing
+    data_split_num: 512  # [MODIFIED] Pretrained=256, increased data splits for fine-tuning
+    batch_size_sample_max: 15  # [MODIFIED] Pretrained=10, adjusted sample batch size
+    retry: 20  # [MODIFIED] Pretrained=2000, reduced retries for stable data
+    batch_size_token_max: 6000  # [ALIGNED] Maximum tokens per batch
+    max_source_length: 12000  # [ALIGNED] Maximum source sequence length
+    max_target_length: 2048  # [ALIGNED] Maximum target sequence length
+    prompt_classes: MultiContextPrompt  # [ALIGNED] Multi-context prompting strategy
+    prompt_conf:  # [ALIGNED] Multi-context prompt configuration
+        max_neg_hotwords_num: 0  # [ALIGNED]
+        min_neg_hotwords_num: 0  # [ALIGNED]
+        use_hist: false  # [ALIGNED]
+        use_one_pass_result: true  # [ALIGNED]
+        use_hotwords: true  # [ALIGNED]
+        use_asr_hotwords: true  # [ALIGNED]
+        chinese_hotwords_list: null  # [ALIGNED]
+        english_hotwords_list: null  # [ALIGNED]
+    ctc_tokenizer: SenseVoiceTokenizer  # [ALIGNED]
+    ctc_target_normalize: true  # [ALIGNED] Normalize CTC targets
+    ctc_tokenizer_conf:  # [ALIGNED]
+        vocab_path: null  # [ALIGNED]
+        is_multilingual: true  # [ALIGNED]
+        num_languages: 8749  # [ALIGNED]
+    min_source_length: 10  # [ALIGNED] Minimum source sequence length
+    batch_size_scale_threshold: 3000  # [ALIGNED] Batch scaling threshold
+    use_dynamic_output_ratio: 0.0  # [ALIGNED] Dynamic output ratio
+
+# ============================================================================
+# TOKENIZER CONFIGURATION
+# ============================================================================
+
+tokenizer: HuggingfaceTokenizer  # [ALIGNED]
+tokenizer_conf:  # [MODIFIED] Fine-tuning specific tokenizer
+    init_param_path: ${llm_conf.init_param_path}  # [ALIGNED] Use LLM init path
+    unk_symbol: <unk>  # [NEW] Unknown token symbol (not in pretrained)
+
+# ============================================================================
+# GLOBAL SETTINGS
+# ============================================================================
+
+enable_tf32: true  # [ALIGNED] Enable TF32 acceleration on NVIDIA GPUs
+debug: false  # [ALIGNED] Debug mode off
+train_data_set_list: null  # [ALIGNED] To be set via CLI argument
+valid_data_set_list: null  # [ALIGNED] To be set via CLI argument
+init_param: null  # [ALIGNED] To be set via CLI argument (load pretrained weights)
+output_dir: null  # [ALIGNED] To be set via CLI argument
+
+# ============================================================================
+# SUMMARY OF CHANGES FOR 8kHz TELEPHONE FINE-TUNING
+# ============================================================================
+#
+# CRITICAL MODIFICATIONS:
+#   1. audio_encoder_conf.freeze: true → false
+#      Reason: Enable encoder fine-tuning to adapt to 8kHz frequency spectrum
+#
+#   2. optim_conf.lr: 5e-6 → 5e-5
+#      Reason: Pretrained LR is too small for fine-tuning; increased 10x
+#
+#   3. train_conf.use_deepspeed: true → false
+#      Reason: Disable distributed training for single GPU fine-tuning
+#
+# IMPORTANT MODIFICATIONS:
+#   - train_conf.max_epoch: 2 → 20 (more training epochs)
+#   - train_conf.keep_nbest_models: 200 → 10 (save disk space)
+#   - train_conf.log_interval: 100 → 10 (more frequent logging)
+#   - scheduler_conf.warmup_steps: 2500 → 1000 (shorter warmup)
+#   - dataset_conf.max_token_length: 3500 → 1024 (memory constraint)
+#   - optim_conf.weight_decay: 0.0 → 0.01 (prevent overfitting)
+#
+# NEW CONFIGURATIONS:
+#   - specaug: SpecAugLFR (data augmentation for fine-tuning)
+#   - specaug_conf.* (SpecAug parameters)
+#   - tokenizer_conf.unk_symbol (explicit unknown token)
+#
+# UNCHANGED COMPONENTS (FROZEN):
+#   - LLM (Qwen3-0.6B): freeze=true
+#   - Audio Adaptor: freeze=true
+#   - CTC Decoder: freeze=false (trainable)
+#
+# ============================================================================
